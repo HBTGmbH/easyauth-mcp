@@ -105,7 +105,7 @@ func TestSessionStartsNewLoginAfterFailure(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	authn := NewAuth(AuthConfig{
+	authn := NewAuth(&AuthConfig{
 		LoginBase: srv.URL, TenantID: "tenant", ClientID: "client", Scope: "s",
 		Store: newFileStore(t), Sleep: func(time.Duration) {}, Out: io.Discard,
 	})

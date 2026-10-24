@@ -243,6 +243,9 @@ git push origin v0.1.0
 
 CI runs `make fmt-check`, `make vet`, `make build`, `make test` and a
 cross-build on every push and pull request (see `.github/workflows/ci.yaml`).
+[golangci-lint](https://golangci-lint.run/) checks the Go code for bugs and
+security issues (see `.github/workflows/golangci-lint.yaml` and
+`.golangci.yml`).
 [zizmor](https://docs.zizmor.sh/) audits the GitHub Actions setup with the
 `pedantic` persona (see `.github/workflows/zizmor.yaml`). Dependabot keeps
 GitHub Actions and Go modules up to date.
@@ -255,11 +258,13 @@ Common tasks are wrapped by the `Makefile`:
 make check   # fmt-check + vet + test, writes nothing
 make build   # build bin/easyauth-mcp
 make cover   # tests with a coverage profile
+make lint    # golangci-lint run ./... (needs golangci-lint)
 make fmt     # gofmt -w .
 ```
 
 `make check` is what a pull request must pass. The raw commands behind it are
-`go vet ./...`, `gofmt -l .` and `go test ./...`.
+`go vet ./...`, `gofmt -l .` and `go test ./...`; `make lint` runs
+golangci-lint as configured in `.golangci.yml`.
 
 Tests run without network access (`httptest` for API clients, and the checked-in
 spec at `testdata/openapi-fixture.json`).

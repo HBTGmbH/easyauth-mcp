@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 func loadFixture(t *testing.T) []byte {
 	t.Helper()
 	path := filepath.Join("..", "..", "testdata", "openapi-fixture.json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: test fixture path
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestConfiguredDeniedTagsAreExcluded(t *testing.T) {
 
 // toolHasTag infers a tag from the fixture paths, because Tool does not expose
 // tags.
-func toolHasTag(tool Tool, denied string) bool {
+func toolHasTag(tool Tool, denied string) bool { //nolint:gocritic // hugeParam: a test helper value copy
 	switch denied {
 	case "etl":
 		return strings.Contains(tool.Path, "/etl/")
@@ -445,7 +446,7 @@ func TestHeaderFiltering(t *testing.T) {
 }
 
 func TestLoadLocalFile(t *testing.T) {
-	data, err := Load(filepath.Join("..", "..", "testdata", "openapi-fixture.json"))
+	data, err := Load(context.Background(), filepath.Join("..", "..", "testdata", "openapi-fixture.json"))
 	if err != nil {
 		t.Fatalf("Load local: %v", err)
 	}
@@ -462,7 +463,7 @@ func TestLoadRemote(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := Load(server.URL)
+	got, err := Load(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Load remote: %v", err)
 	}
@@ -477,7 +478,7 @@ func TestLoadRemoteError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := Load(server.URL); err == nil {
+	if _, err := Load(context.Background(), server.URL); err == nil {
 		t.Errorf("expected error for non-2xx response")
 	}
 }
@@ -600,7 +601,7 @@ func TestLoadRemoteSizeLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := Load(server.URL)
+	_, err := Load(context.Background(), server.URL)
 	if err == nil || !strings.Contains(err.Error(), "spec too large") {
 		t.Errorf("expected spec too large error, got %v", err)
 	}
@@ -617,7 +618,7 @@ func TestLoadRemoteWithinSizeLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := Load(server.URL)
+	got, err := Load(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

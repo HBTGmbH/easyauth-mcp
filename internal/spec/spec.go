@@ -2,12 +2,14 @@
 package spec
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -83,30 +85,30 @@ func DefaultFilter() Filter {
 }
 
 // Load reads an OpenAPI document from a local file or an http(s) URL.
-func Load(location string) ([]byte, error) {
-	return LoadWithHeader(location, nil)
+func Load(ctx context.Context, location string) ([]byte, error) {
+	return LoadWithHeader(ctx, location, nil)
 }
 
 // LoadWithHeader is Load with extra request headers, used to fetch a spec that
 // itself requires authentication. Headers are only applied to http(s) URLs.
-func LoadWithHeader(location string, header http.Header) ([]byte, error) {
+func LoadWithHeader(ctx context.Context, location string, header http.Header) ([]byte, error) {
 	if u, err := url.Parse(location); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-		return loadRemote(location, header)
+		return loadRemote(ctx, location, header)
 	}
 	return loadFile(location)
 }
 
 func loadFile(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read spec file %q: %w", path, err)
 	}
 	return data, nil
 }
 
-func loadRemote(location string, header http.Header) ([]byte, error) {
+func loadRemote(ctx context.Context, location string, header http.Header) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, location, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("fetch spec %q: %w", location, err)
 	}
@@ -120,9 +122,7 @@ func loadRemote(location string, header http.Header) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch spec %q: %w", location, err)
 	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -225,7 +225,7 @@ func methodAllowed(method string, allowed []string) bool {
 
 // tagsAllowed applies the allow/deny logic: a non-empty allowlist is
 // authoritative; otherwise all tags are allowed except DeniedTags.
-func tagsAllowed(tags []string, allowed []string) bool {
+func tagsAllowed(tags, allowed []string) bool {
 	if len(allowed) == 0 {
 		for _, tag := range tags {
 			if slices.Contains(DeniedTags, tag) {
@@ -256,11 +256,11 @@ func buildDescription(operation *openapi3.Operation, method, path string) string
 }
 
 // truncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune.
-func truncateUTF8(s string, max int) string {
-	if len(s) <= max {
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	cut := max
+	cut := limit
 	for cut > 0 && s[cut]&0xC0 == 0x80 { // back off continuation bytes
 		cut--
 	}

@@ -1,0 +1,49 @@
+version: "2"
+
+# Only linters that can find bugs or security issues, no style linters.
+# gosec and gocritic run with every rule; silence a false positive at its site
+# with //nolint:<linter> // <rule>: <reason> instead of disabling the rule.
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - makezero
+    - musttag
+    - nilerr
+    - nilnesserr
+    - noctx
+    - nosprintfhostport
+    - reassign
+    - wastedassign
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # memory layout, not correctness
+        - findcall # demo analyzer
+    staticcheck:
+      checks: ["SA*"] # bug checks only; S, ST and QF are style
+    gocritic:
+      enable-all: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    fatcontext:
+      check-struct-pointers: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

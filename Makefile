@@ -1,7 +1,7 @@
 BINARY := bin/easyauth-mcp
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build test cover fmt fmt-check vet check tidy clean run
+.PHONY: build test cover fmt fmt-check vet lint check tidy clean run
 
 build:
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/easyauth-mcp
@@ -20,6 +20,10 @@ fmt-check:
 
 vet:
 	go vet ./...
+
+# Needs golangci-lint (https://golangci-lint.run), configured in .golangci.yml.
+lint:
+	golangci-lint run ./...
 
 check: fmt-check vet test
 

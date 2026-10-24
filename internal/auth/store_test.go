@@ -40,7 +40,7 @@ func TestFileStorePermissionsAndRoundTrip(t *testing.T) {
 		RefreshToken: "refresh",
 		ExpiresAt:    time.Now().Add(time.Hour).Truncate(time.Second),
 	}
-	if err := store.Save(want); err != nil {
+	if err := store.Save(&want); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +68,7 @@ func TestFileStoreCreatesDirPrivate(t *testing.T) {
 	dir := t.TempDir()
 	nested := filepath.Join(dir, "state")
 	store := &FileStore{Path: filepath.Join(nested, "token.json")}
-	if err := store.Save(Token{AccessToken: "x"}); err != nil {
+	if err := store.Save(&Token{AccessToken: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(nested)
@@ -84,7 +84,7 @@ func TestFileStoreAtomicNoTempLeftover(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "token.json")}
 	for i := range 3 {
-		if err := store.Save(Token{AccessToken: "a", RefreshToken: "r"}); err != nil {
+		if err := store.Save(&Token{AccessToken: "a", RefreshToken: "r"}); err != nil {
 			t.Fatalf("save %d: %v", i, err)
 		}
 	}
@@ -103,7 +103,7 @@ func TestFileStoreAtomicNoTempLeftover(t *testing.T) {
 
 func TestFileStoreJSONFields(t *testing.T) {
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "access", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "access", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	raw := readJSON(t, store)
@@ -116,7 +116,7 @@ func TestFileStoreJSONFields(t *testing.T) {
 
 func TestFileStoreDelete(t *testing.T) {
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "x"}); err != nil {
+	if err := store.Save(&Token{AccessToken: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Delete(); err != nil {
@@ -137,7 +137,7 @@ func TestFileStoreDelete(t *testing.T) {
 func TestFileStoreLoadDecodesOID(t *testing.T) {
 	store := newFileStore(t)
 	jwt := fakeJWT(t, map[string]any{"oid": "oid-x", "mailnickname": "mx"})
-	if err := store.Save(Token{AccessToken: jwt}); err != nil {
+	if err := store.Save(&Token{AccessToken: jwt}); err != nil {
 		t.Fatal(err)
 	}
 	tok, err := store.Load()

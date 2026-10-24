@@ -15,7 +15,7 @@ import (
 	"github.com/HBTGmbH/easyauth-mcp/internal/spec"
 )
 
-func tokenFunc(tok auth.Token) func(context.Context) (auth.Token, error) {
+func tokenFunc(tok auth.Token) func(context.Context) (auth.Token, error) { //nolint:gocritic // hugeParam: a test helper value copy
 	return func(context.Context) (auth.Token, error) { return tok, nil }
 }
 
@@ -48,14 +48,14 @@ func TestCallGetWithTokenHeaders(t *testing.T) {
 			t.Errorf("Accept = %q", r.Header.Get("Accept"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, tokenFunc(auth.Token{AccessToken: "tok", OID: "oid-1"}))
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/favorite", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -71,7 +71,7 @@ func TestCallPathEncoding(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.RequestURI
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -83,7 +83,7 @@ func TestCallPathEncoding(t *testing.T) {
 		ParamIn:     map[string]string{"employeeSign": "path"},
 	}
 
-	res := c.Call(context.Background(), tool, map[string]any{"employeeSign": "a b/c"})
+	res := c.Call(context.Background(), &tool, map[string]any{"employeeSign": "a b/c"})
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -96,7 +96,7 @@ func TestCallPathTraversalRejected(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -109,7 +109,7 @@ func TestCallPathTraversalRejected(t *testing.T) {
 	}
 
 	for _, unsafe := range []string{"..", "../x", "", `a\b`, "a/../b"} {
-		res := c.Call(context.Background(), tool, map[string]any{"employeeSign": unsafe})
+		res := c.Call(context.Background(), &tool, map[string]any{"employeeSign": unsafe})
 		if !res.IsError {
 			t.Errorf("employeeSign %q: expected error", unsafe)
 			continue
@@ -127,14 +127,14 @@ func TestCallPathLiteralDotSegment(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.EscapedPath()
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/workingday/.me", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -147,7 +147,7 @@ func TestCallQueryFiltersUnknownArgs(t *testing.T) {
 	var query string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.RawQuery
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -159,7 +159,7 @@ func TestCallQueryFiltersUnknownArgs(t *testing.T) {
 		ParamIn:     paramIn("query", "refDate", "days"),
 	}
 
-	res := c.Call(context.Background(), tool, map[string]any{
+	res := c.Call(context.Background(), &tool, map[string]any{
 		"refDate": "2025-09-09",
 		"days":    float64(3),
 		"csv":     true,
@@ -180,7 +180,7 @@ func TestCallHeaderParameter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotTenant = r.Header.Get("X-Tenant")
 		gotAuth = r.Header.Get("Authorization")
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -192,7 +192,7 @@ func TestCallHeaderParameter(t *testing.T) {
 		ParamIn:     map[string]string{"X-Tenant": "header", "Authorization": "header"},
 	}
 
-	res := c.Call(context.Background(), tool, map[string]any{
+	res := c.Call(context.Background(), &tool, map[string]any{
 		"X-Tenant":      "tenant-1",
 		"Authorization": "Bearer injected",
 	})
@@ -211,7 +211,7 @@ func TestCallNoParamMetadataIsError(t *testing.T) {
 	c := NewClient("http://127.0.0.1:1", nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema()}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError || !strings.Contains(res.ErrorMessage, "parameter metadata") {
 		t.Fatalf("unexpected result: %+v", res)
 	}
@@ -222,13 +222,13 @@ func TestCallRetryAfter401(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`expired`))
+			_, _ = w.Write([]byte(`expired`))
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer fresh" {
 			t.Errorf("Authorization = %q after refresh", r.Header.Get("Authorization"))
 		}
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer srv.Close()
 
@@ -239,7 +239,7 @@ func TestCallRetryAfter401(t *testing.T) {
 	}
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/favorite", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -259,7 +259,7 @@ func TestCallRetryAfter401StillUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`nope`))
+		_, _ = w.Write([]byte(`nope`))
 	}))
 	defer srv.Close()
 
@@ -270,7 +270,7 @@ func TestCallRetryAfter401StillUnauthorized(t *testing.T) {
 	}
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/favorite", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError {
 		t.Fatal("expected error")
 	}
@@ -299,14 +299,14 @@ func TestCallUnauthorizedWithoutRefresh(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(`denied`))
+				_, _ = w.Write([]byte(`denied`))
 			}))
 			defer srv.Close()
 
 			c := NewClient(srv.URL, tc.token)
 			tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-			res := c.Call(context.Background(), tool, nil)
+			res := c.Call(context.Background(), &tool, nil)
 			if !res.IsError {
 				t.Fatal("401 must be an error")
 			}
@@ -324,7 +324,7 @@ func TestCallForbiddenNoRefresh(t *testing.T) {
 	var refreshes atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"error":"role"}`))
+		_, _ = w.Write([]byte(`{"error":"role"}`))
 	}))
 	defer srv.Close()
 
@@ -335,7 +335,7 @@ func TestCallForbiddenNoRefresh(t *testing.T) {
 	}
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("403 must not be an error: %s", res.ErrorMessage)
 	}
@@ -350,14 +350,14 @@ func TestCallForbiddenNoRefresh(t *testing.T) {
 func TestCallNotFoundIsContent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("404 must not be an error: %s", res.ErrorMessage)
 	}
@@ -369,14 +369,14 @@ func TestCallNotFoundIsContent(t *testing.T) {
 func TestCallServerErrorIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`boom`))
+		_, _ = w.Write([]byte(`boom`))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError {
 		t.Fatal("500 must be an error")
 	}
@@ -388,7 +388,7 @@ func TestCallServerErrorIsError(t *testing.T) {
 func TestCallTruncatesBody(t *testing.T) {
 	payload := strings.Repeat("x", 1000)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(payload))
+		_, _ = w.Write([]byte(payload))
 	}))
 	defer srv.Close()
 
@@ -396,7 +396,7 @@ func TestCallTruncatesBody(t *testing.T) {
 	c.MaxBody = 100
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -415,7 +415,7 @@ func TestCallTruncationKeepsValidUTF8(t *testing.T) {
 	// Multi-byte runes so that a byte-based cut would split one.
 	payload := strings.Repeat("ä", 500)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(payload))
+		_, _ = w.Write([]byte(payload))
 	}))
 	defer srv.Close()
 
@@ -423,7 +423,7 @@ func TestCallTruncationKeepsValidUTF8(t *testing.T) {
 	c.MaxBody = 101 // odd limit inside a 2-byte rune
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -445,7 +445,7 @@ func TestCallStaticHeaders(t *testing.T) {
 		if r.Header.Get("x-ms-client-principal-id") != "static-oid" {
 			t.Errorf("x-ms-client-principal-id = %q", r.Header.Get("x-ms-client-principal-id"))
 		}
-		w.Write([]byte(`ok`))
+		_, _ = w.Write([]byte(`ok`))
 	}))
 	defer srv.Close()
 
@@ -460,7 +460,7 @@ func TestCallStaticHeaders(t *testing.T) {
 	}
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -473,7 +473,7 @@ func TestCallStaticHeaderNotOverwrittenByToken(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		w.Write([]byte(`ok`))
+		_, _ = w.Write([]byte(`ok`))
 	}))
 	defer srv.Close()
 
@@ -481,7 +481,7 @@ func TestCallStaticHeaderNotOverwrittenByToken(t *testing.T) {
 	c.Static = http.Header{"Authorization": {"Bearer static"}}
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -499,7 +499,7 @@ func TestCallTransportErrorHidesURL(t *testing.T) {
 	c := NewClient(srvURL, nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError {
 		t.Fatal("expected transport error")
 	}
@@ -517,7 +517,7 @@ func TestCallTokenError(t *testing.T) {
 	})
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError || !strings.Contains(res.ErrorMessage, "login failed") {
 		t.Fatalf("unexpected result: %+v", res)
 	}
@@ -532,7 +532,7 @@ func TestCallMissingPathParam(t *testing.T) {
 		ParamIn:     map[string]string{"employeeSign": "path"},
 	}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError || !strings.Contains(res.ErrorMessage, "employeeSign") {
 		t.Fatalf("unexpected result: %+v", res)
 	}
@@ -547,7 +547,7 @@ func TestCallPostSendsJSONBody(t *testing.T) {
 		gotContentType = r.Header.Get("Content-Type")
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -564,7 +564,7 @@ func TestCallPostSendsJSONBody(t *testing.T) {
 		},
 	}
 
-	res := c.Call(context.Background(), tool, map[string]any{
+	res := c.Call(context.Background(), &tool, map[string]any{
 		"id":        "1",
 		"date":      "2025-09-09",
 		"startTime": "08:00",
@@ -595,7 +595,7 @@ func TestCallGetWithBodyPropertyIsError(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -607,7 +607,7 @@ func TestCallGetWithBodyPropertyIsError(t *testing.T) {
 		ParamIn:     map[string]string{"date": "body"},
 	}
 
-	res := c.Call(context.Background(), tool, map[string]any{"date": "2025-09-09"})
+	res := c.Call(context.Background(), &tool, map[string]any{"date": "2025-09-09"})
 	if !res.IsError {
 		t.Fatal("expected error for body field on GET")
 	}
@@ -624,7 +624,7 @@ func TestCallBaseURLQueryPreserved(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotLoginName = r.URL.Query().Get("login-name")
 		gotDays = r.URL.Query().Get("days")
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -636,7 +636,7 @@ func TestCallBaseURLQueryPreserved(t *testing.T) {
 		ParamIn:     map[string]string{"days": "query"},
 	}
 
-	res := c.Call(context.Background(), tool, map[string]any{"days": float64(3)})
+	res := c.Call(context.Background(), &tool, map[string]any{"days": float64(3)})
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -652,14 +652,14 @@ func TestCallBaseURLQueryWithoutToolArgs(t *testing.T) {
 	var gotLoginName string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotLoginName = r.URL.Query().Get("login-name")
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL+"?login-name=tt", nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/favorite", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -673,7 +673,7 @@ func TestCallToolWithoutParameters(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer srv.Close()
 
@@ -686,7 +686,7 @@ func TestCallToolWithoutParameters(t *testing.T) {
 		ParamIn:     map[string]string{},
 	}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
 	}
@@ -697,13 +697,13 @@ func TestCallToolWithoutParameters(t *testing.T) {
 
 func TestCallRejectsMissingParameterMetadata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, nil)
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/favorite"}
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError || !strings.Contains(res.ErrorMessage, "parameter metadata") {
 		t.Fatalf("unexpected result: %+v", res)
 	}
@@ -720,7 +720,7 @@ func TestCallServerErrorKeepsBody(t *testing.T) {
 	c.Static = http.Header{"Authorization": {"Bearer x"}}
 	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema(), ParamIn: map[string]string{}}
 
-	res := c.Call(context.Background(), tool, nil)
+	res := c.Call(context.Background(), &tool, nil)
 	if !res.IsError {
 		t.Fatal("expected a server error to be reported as error")
 	}

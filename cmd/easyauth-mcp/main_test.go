@@ -22,7 +22,7 @@ import (
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "easyauth-mcp")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", bin, ".") //nolint:gosec // G204: fixed arguments, bin is a temp path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build failed: %v\n%s", err, out)
 	}
@@ -31,7 +31,7 @@ func buildBinary(t *testing.T) string {
 
 func newSession(t *testing.T, bin string, env ...string) *mcp.ClientSession {
 	t.Helper()
-	cmd := exec.Command(bin)
+	cmd := exec.CommandContext(context.Background(), bin) //nolint:gosec // G204: bin is the test-built binary
 	cmd.Env = append(envScrubbed(), env...)
 	cmd.Stderr = os.Stderr
 
@@ -66,7 +66,7 @@ func TestStdioListsAndCallsWithStaticAuth(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `[{"sign":"AB","label":"Favorite"}]`)
+		_, _ = fmt.Fprint(w, `[{"sign":"AB","label":"Favorite"}]`)
 	}))
 	defer srv.Close()
 
@@ -77,7 +77,7 @@ func TestStdioListsAndCallsWithStaticAuth(t *testing.T) {
 		"EASYAUTH_AUTH_HEADER=Bearer test-token",
 		"EASYAUTH_PRINCIPAL_HEADER=oid-1",
 	)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	ctx := context.Background()
 	list, err := session.ListTools(ctx, nil)
@@ -129,7 +129,7 @@ func TestStdioFiltersByTags(t *testing.T) {
 		"EASYAUTH_ALLOWED_TAGS=favorite,daily report,working days,overtime,order,report",
 		"EASYAUTH_ALLOWED_METHODS=GET",
 	)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	list, err := session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -149,7 +149,7 @@ func TestStdioWithoutConfigOffersSetup(t *testing.T) {
 	bin := buildBinary(t)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	session := newSession(t, bin, "EASYAUTH_CONFIG="+configPath)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	ctx := context.Background()
 	list, err := session.ListTools(ctx, nil)
@@ -184,7 +184,7 @@ func TestStdioUnloadableSpecOffersSetup(t *testing.T) {
 		"EASYAUTH_OPENAPI="+filepath.Join(t.TempDir(), "missing-spec.json"),
 		"EASYAUTH_AUTH_HEADER=Bearer test-token",
 	)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	ctx := context.Background()
 	list, err := session.ListTools(ctx, nil)
@@ -258,7 +258,7 @@ func TestStartupWithoutTokenServesAndPromptsOnCall(t *testing.T) {
 		"EASYAUTH_SCOPE=api://client/user_impersonation",
 		"EASYAUTH_TOKEN_STORE="+filepath.Join(t.TempDir(), "token.json"),
 	)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	ctx := context.Background()
 	list, err := session.ListTools(ctx, nil)
@@ -288,7 +288,7 @@ func TestStartupWithoutTokenServesAndPromptsOnCall(t *testing.T) {
 // TestSignInRegistersToolsWithoutRestart verifies the list_changed flow: after
 // the sign-in tool completes, the real tools appear on the same connection.
 func TestSignInRegistersToolsWithoutRestart(t *testing.T) {
-	specData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "openapi-fixture.json"))
+	specData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "openapi-fixture.json")) //nolint:gosec // G304: test fixture path
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestSignInRegistersToolsWithoutRestart(t *testing.T) {
 		"EASYAUTH_SCOPE=api://client/user_impersonation",
 		"EASYAUTH_TOKEN_STORE="+filepath.Join(t.TempDir(), "token.json"),
 	)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	ctx := context.Background()
 	before, err := session.ListTools(ctx, nil)
@@ -349,11 +349,11 @@ func TestSignInRegistersToolsWithoutRestart(t *testing.T) {
 	// A second call must complete the sign-in and install the tools.
 	var lastText string
 	for range 40 {
-		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: signInToolName, Arguments: map[string]any{}})
-		if err != nil {
-			t.Fatalf("call sign-in: %v", err)
+		res, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: signInToolName, Arguments: map[string]any{}})
+		if callErr != nil {
+			t.Fatalf("call sign-in: %v", callErr)
 		}
-		lastText = contentText(result)
+		lastText = contentText(res)
 		if strings.Contains(lastText, "now available") {
 			break
 		}
@@ -377,7 +377,7 @@ func TestSignInRegistersToolsWithoutRestart(t *testing.T) {
 
 func fakeJWT(oid string) string {
 	enc := base64.RawURLEncoding
-	payload, _ := json.Marshal(map[string]any{"oid": oid, "mailnickname": "sign", "exp": 9999999999})
+	payload, _ := json.Marshal(map[string]any{"oid": oid, "mailnickname": "sign", "exp": 9999999999}) //nolint:errchkjson // fixed test payload
 	return enc.EncodeToString([]byte(`{"alg":"none"}`)) + "." +
 		enc.EncodeToString(payload) + ".sig"
 }
@@ -385,7 +385,7 @@ func fakeJWT(oid string) string {
 // TestStaticHeaderLoadsProtectedSpec covers the static auth mode when the API
 // docs themselves require authentication.
 func TestStaticHeaderLoadsProtectedSpec(t *testing.T) {
-	specData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "openapi-fixture.json"))
+	specData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "openapi-fixture.json")) //nolint:gosec // G304: test fixture path
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestStaticHeaderLoadsProtectedSpec(t *testing.T) {
 		"EASYAUTH_AUTH_HEADER=Bearer static-token",
 		"EASYAUTH_ALLOWED_TAGS=favorite",
 	)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	list, err := session.ListTools(context.Background(), nil)
 	if err != nil {

@@ -65,7 +65,7 @@ type Token struct {
 // Valid reports whether the access token is present and not about to expire.
 // When the JWT exposes an exp claim, that value is authoritative; otherwise
 // ExpiresAt (from the token endpoint's expires_in) is used.
-func (t Token) Valid() bool {
+func (t *Token) Valid() bool {
 	if t.AccessToken == "" {
 		return false
 	}
@@ -78,7 +78,7 @@ func (t Token) Valid() bool {
 
 // Header returns request headers for the token: Authorization Bearer and,
 // when an OID is known, x-ms-client-principal-id as required by EasyAuth.
-func (t Token) Header() http.Header {
+func (t *Token) Header() http.Header {
 	h := make(http.Header)
 	h.Set("Authorization", "Bearer "+t.AccessToken)
 	if t.OID != "" {
@@ -143,7 +143,8 @@ type Auth struct {
 
 // NewAuth returns an Auth with defaults applied. It does not contact the
 // network; tokens are loaded lazily on first use.
-func NewAuth(cfg AuthConfig) *Auth {
+func NewAuth(base *AuthConfig) *Auth {
+	cfg := *base
 	if cfg.LoginBase == "" {
 		cfg.LoginBase = DefaultLoginBase
 	}
@@ -217,7 +218,7 @@ func (a *Auth) Login(ctx context.Context) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
-	return a.persist(tok), nil
+	return a.persist(&tok), nil
 }
 
 // resolve implements the shared AccessToken/Refresh logic. The caller must hold
@@ -230,7 +231,7 @@ func (a *Auth) resolve(ctx context.Context, mode tokenMode) (Token, error) {
 	if a.token.RefreshToken != "" {
 		tok, err := a.refresh(ctx)
 		if err == nil {
-			return a.persist(tok), nil
+			return a.persist(&tok), nil
 		}
 		if !errors.Is(err, errReauth) {
 			return Token{}, fmt.Errorf("refreshing access token: %w", err)
@@ -243,7 +244,7 @@ func (a *Auth) resolve(ctx context.Context, mode tokenMode) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
-	return a.persist(tok), nil
+	return a.persist(&tok), nil
 }
 
 // load fills the in-memory token from the store. A broken store is reported as
@@ -261,16 +262,16 @@ func (a *Auth) load() {
 	a.token = cached
 }
 
-func (a *Auth) persist(tok Token) Token {
-	a.setClaims(&tok)
-	a.token = tok
+func (a *Auth) persist(tok *Token) Token {
+	a.setClaims(tok)
+	a.token = *tok
 	if a.cfg.Store == nil {
-		return tok
+		return *tok
 	}
 	if err := a.cfg.Store.Save(tok); err != nil {
 		a.announce("warning: could not save the access token: " + err.Error())
 	}
-	return tok
+	return *tok
 }
 
 func (a *Auth) clear() {
@@ -406,7 +407,7 @@ func (a *Auth) requestDeviceCode(ctx context.Context) (DeviceLogin, error) {
 		return DeviceLogin{}, err
 	}
 	if status < 200 || status >= 300 || dc.DeviceCode == "" {
-		a.announce("warning: device code request failed: " + describeDevice(dc))
+		a.announce("warning: device code request failed: " + describeDevice(&dc))
 		return DeviceLogin{}, fmt.Errorf("device code endpoint returned %d: %s", status, errorCode(dc.Error))
 	}
 	return DeviceLogin{
@@ -492,9 +493,7 @@ func (a *Auth) postForm(ctx context.Context, endpoint string, form url.Values, o
 	if err != nil {
 		return 0, fmt.Errorf("token request failed: %w", cause(err))
 	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if len(body) == 0 {
@@ -519,7 +518,7 @@ func describe(tr tokenResponse) string {
 }
 
 // describeDevice is the deviceCode counterpart of describe (stderr only).
-func describeDevice(dc deviceCode) string {
+func describeDevice(dc *deviceCode) string {
 	if dc.Error == "" {
 		return "no device code in response"
 	}
@@ -579,7 +578,7 @@ func (a *Auth) TryToken(ctx context.Context) (Token, bool, error) {
 	}
 	tok, err := a.refresh(ctx)
 	if err == nil {
-		return a.persist(tok), true, nil
+		return a.persist(&tok), true, nil
 	}
 	if errors.Is(err, errReauth) {
 		a.clear()

@@ -39,7 +39,7 @@ func NewSession(a *Auth) *Session {
 // *ErrLoginRequired carrying the user code. Calling Token again after the user
 // confirmed returns the stored token.
 func (s *Session) Token(ctx context.Context) (Token, error) {
-	if tok, ok := s.cached(); ok {
+	if tok, ok := s.cached(ctx); ok {
 		return tok, nil
 	}
 
@@ -88,8 +88,8 @@ func (s *Session) Refresh(ctx context.Context) (Token, error) {
 }
 
 // cached returns a valid or refreshable token without user interaction.
-func (s *Session) cached() (Token, bool) {
-	tok, ok, err := s.auth.TryToken(context.Background())
+func (s *Session) cached(ctx context.Context) (Token, bool) {
+	tok, ok, err := s.auth.TryToken(ctx)
 	if err != nil || !ok {
 		return Token{}, false
 	}
@@ -136,7 +136,7 @@ func (s *Session) startLocked(ctx context.Context) *pendingLogin {
 		s.auth.deviceHook = nil
 		s.auth.mu.Unlock()
 		if err == nil {
-			tok = s.auth.persist(tok)
+			tok = s.auth.persist(&tok)
 		}
 		p.token, p.err = tok, err
 		close(p.done)
@@ -153,8 +153,8 @@ func (s *Session) startLocked(ctx context.Context) *pendingLogin {
 // cached, stored, or obtainable via the refresh token. It never starts a device
 // login and never blocks on interaction. Use it where a login would be
 // surprising, e.g. while loading the OpenAPI spec at startup.
-func (s *Session) Peek(_ context.Context) (Token, error) {
-	tok, ok := s.cached()
+func (s *Session) Peek(ctx context.Context) (Token, error) {
+	tok, ok := s.cached(ctx)
 	if !ok {
 		return Token{}, errors.New("no token available without sign-in")
 	}

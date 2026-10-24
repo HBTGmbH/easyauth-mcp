@@ -29,9 +29,10 @@ func fakeJWT(t *testing.T, claims map[string]any) string {
 		enc.EncodeToString(payload) + ".sig"
 }
 
-func testServer(t *testing.T, tokenHandler func(call int) (int, map[string]any)) (*httptest.Server, *int32) {
+func testServer(t *testing.T, tokenHandler func(call int) (int, map[string]any)) (srv *httptest.Server, calls *int32) {
 	t.Helper()
-	var calls int32
+	var counter int32
+	calls = &counter
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tenant/oauth2/v2.0/devicecode", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -44,12 +45,12 @@ func testServer(t *testing.T, tokenHandler func(call int) (int, map[string]any))
 		})
 	})
 	mux.HandleFunc("/tenant/oauth2/v2.0/token", func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := atomic.AddInt32(&counter, 1)
 		status, body := tokenHandler(int(n))
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(body)
 	})
-	return httptest.NewServer(mux), &calls
+	return httptest.NewServer(mux), calls
 }
 
 func newTestAuth(srv *httptest.Server, store Store, out *bytes.Buffer) *Auth {
@@ -68,7 +69,7 @@ func newTestAuth(srv *httptest.Server, store Store, out *bytes.Buffer) *Auth {
 	if w != nil {
 		cfg.Out = w
 	}
-	return NewAuth(cfg)
+	return NewAuth(&cfg)
 }
 
 func newFileStore(t *testing.T) *FileStore {
@@ -116,7 +117,7 @@ func TestCachedTokenIsReused(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "cached", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "cached", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,7 +140,7 @@ func TestExpiredTokenIsRefreshed(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "old", RefreshToken: "refresh-1", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "old", RefreshToken: "refresh-1", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,7 +170,7 @@ func TestInvalidGrantTriggersDeviceLogin(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "old", RefreshToken: "stale", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "old", RefreshToken: "stale", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,7 +207,7 @@ func TestRefreshForcedWithValidAccessToken(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "cached", RefreshToken: "r1", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "cached", RefreshToken: "r1", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -236,7 +237,7 @@ func TestRefreshInvalidGrantClearsStoreAndLogsIn(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "cached", RefreshToken: "stale", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "cached", RefreshToken: "stale", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +271,7 @@ func TestRefreshWithoutRefreshTokenStartsDeviceLogin(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "cached", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "cached", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -293,7 +294,7 @@ func TestLoginClearsAndStartsDeviceFlow(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "cached", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "cached", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	tok, err := newTestAuth(srv, store, nil).Login(context.Background())
@@ -315,12 +316,12 @@ func TestRefreshNetworkErrorDoesNotRelogin(t *testing.T) {
 		// Abort the connection to simulate a transport failure.
 		hj, _ := w.(http.Hijacker)
 		conn, _, _ := hj.Hijack()
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "old", RefreshToken: "r", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "old", RefreshToken: "r", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -342,12 +343,13 @@ func TestRefreshNetworkErrorDoesNotRelogin(t *testing.T) {
 func TestNetworkErrorLeaksNoURLOrTenant(t *testing.T) {
 	// A closed listener gives a connection-refused error while the request URL
 	// still carries the tenant GUID.
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	addr := l.Addr().String()
-	l.Close()
+	_ = l.Close()
 
 	const tenantID = "tenant-guid-1234"
 	cfg := AuthConfig{
@@ -358,9 +360,9 @@ func TestNetworkErrorLeaksNoURLOrTenant(t *testing.T) {
 		Store:     &FileStore{Path: filepath.Join(t.TempDir(), "t.json")},
 		Sleep:     func(time.Duration) {},
 	}
-	a := NewAuth(cfg)
-	if err := a.cfg.Store.Save(Token{RefreshToken: "r", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
-		t.Fatal(err)
+	a := NewAuth(&cfg)
+	if saveErr := a.cfg.Store.Save(&Token{RefreshToken: "r", ExpiresAt: time.Now().Add(-time.Minute)}); saveErr != nil {
+		t.Fatal(saveErr)
 	}
 
 	_, err = a.AccessToken(context.Background())
@@ -384,7 +386,7 @@ func TestErrorDescriptionNotInReturnedError(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{RefreshToken: "r", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+	if err := store.Save(&Token{RefreshToken: "r", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -405,13 +407,16 @@ func TestErrorDescriptionNotInReturnedError(t *testing.T) {
 }
 
 func TestTokenValid(t *testing.T) {
-	if (Token{AccessToken: "x", ExpiresAt: time.Now().Add(30 * time.Second)}).Valid() {
+	near := Token{AccessToken: "x", ExpiresAt: time.Now().Add(30 * time.Second)}
+	if near.Valid() {
 		t.Error("token expiring in 30s must not be valid")
 	}
-	if !(Token{AccessToken: "x", ExpiresAt: time.Now().Add(5 * time.Minute)}).Valid() {
+	fresh := Token{AccessToken: "x", ExpiresAt: time.Now().Add(5 * time.Minute)}
+	if !fresh.Valid() {
 		t.Error("token expiring in 5m must be valid")
 	}
-	if (Token{ExpiresAt: time.Now().Add(time.Hour)}).Valid() {
+	empty := Token{ExpiresAt: time.Now().Add(time.Hour)}
+	if empty.Valid() {
 		t.Error("empty access token must not be valid")
 	}
 }
@@ -538,7 +543,7 @@ func TestConcurrentAccessTokenSingleRefresh(t *testing.T) {
 	defer srv.Close()
 
 	store := newFileStore(t)
-	if err := store.Save(Token{AccessToken: "old", RefreshToken: "r1", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+	if err := store.Save(&Token{AccessToken: "old", RefreshToken: "r1", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	a := newTestAuth(srv, store, nil)

@@ -17,9 +17,9 @@ var skippedHeaders = map[string]struct{}{
 // buildInputSchema merges path, query and header parameters plus the JSON
 // request body into a single flat object schema. The returned map associates
 // every included property with its parameter location.
-func buildInputSchema(operation *openapi3.Operation, pathItem *openapi3.PathItem) (map[string]any, map[string]string) {
+func buildInputSchema(operation *openapi3.Operation, pathItem *openapi3.PathItem) (schema map[string]any, paramIn map[string]string) {
 	properties := make(map[string]any)
-	paramIn := make(map[string]string)
+	paramIn = make(map[string]string)
 	var required []string
 
 	parameters := mergeParameters(pathItem.Parameters, operation.Parameters)
@@ -53,7 +53,7 @@ func buildInputSchema(operation *openapi3.Operation, pathItem *openapi3.PathItem
 
 	addRequestBody(operation.RequestBody, properties, paramIn, &required)
 
-	schema := map[string]any{"type": "object"}
+	schema = map[string]any{"type": "object"}
 	if len(properties) > 0 {
 		schema["properties"] = properties
 	}

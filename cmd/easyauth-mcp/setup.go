@@ -22,7 +22,7 @@ const helpToolName = "easyauth_help"
 // registerHelpTool exposes a tool that reports why the server is not fully
 // operational. It keeps tools/list valid and gives every tools/call a readable
 // answer instead of a dropped connection.
-func registerHelpTool(server *mcp.Server, s settings, cause error) {
+func registerHelpTool(server *mcp.Server, s *settings, cause error) {
 	server.AddTool(&mcp.Tool{
 		Name:        helpToolName,
 		Description: "Explain why easyauth-mcp is not ready and which configuration is missing. Only exposed when the server cannot build the API tools.",
@@ -34,7 +34,7 @@ func registerHelpTool(server *mcp.Server, s settings, cause error) {
 
 // diagnosis lists the environment variables the process actually saw and the
 // concrete cause. Only variable presence is reported, never values.
-func diagnosis(s settings, cause error) string {
+func diagnosis(s *settings, cause error) string {
 	var lines []string
 	lines = append(lines, "easyauth-mcp is not ready.")
 	if cause != nil {
@@ -83,7 +83,7 @@ func registerSignInTool(server *mcp.Server, reg *registrar) {
 		s := reg.settings
 		session, err := buildSession(s, reg.stderr)
 		if err != nil {
-			return errorResult("easyauth-mcp is not configured for authentication: " + err.Error()), nil
+			return errorResult("easyauth-mcp is not configured for authentication: " + err.Error()), nil //nolint:nilerr // the error is reported inside the tool result
 		}
 
 		tok, err := session.Peek(ctx)
@@ -97,19 +97,19 @@ func registerSignInTool(server *mcp.Server, reg *registrar) {
 			}
 		}
 
-		data, err := spec.LoadWithHeader(s.OpenAPI, tok.Header())
+		data, err := spec.LoadWithHeader(ctx, s.OpenAPI, tok.Header())
 		if err != nil {
-			return errorResult("signed in, but loading the OpenAPI spec failed: " + err.Error()), nil
+			return errorResult("signed in, but loading the OpenAPI spec failed: " + err.Error()), nil //nolint:nilerr // the error is reported inside the tool result
 		}
 		tools, err := buildTools(data, s)
 		if err != nil {
-			return errorResult("signed in, but building tools failed: " + err.Error()), nil
+			return errorResult("signed in, but building tools failed: " + err.Error()), nil //nolint:nilerr // the error is reported inside the tool result
 		}
 		if len(tools) == 0 {
 			return errorResult("Signed in, but the OpenAPI spec produced no tools with the current filter."), nil
 		}
 		if err := reg.install(ctx, tools); err != nil {
-			return errorResult("Signed in, but installing the tools failed: " + err.Error()), nil
+			return errorResult("Signed in, but installing the tools failed: " + err.Error()), nil //nolint:nilerr // the error is reported inside the tool result
 		}
 		return textResult(fmt.Sprintf(
 			"Signed in. %d API tool(s) are now available and already registered (%s). "+

@@ -11,7 +11,7 @@ import (
 // Store persists the OAuth token between runs.
 type Store interface {
 	Load() (Token, error)
-	Save(Token) error
+	Save(*Token) error
 	Delete() error
 }
 
@@ -48,12 +48,12 @@ func (s *FileStore) Load() (Token, error) {
 
 // Save writes the token atomically. The directory is created (0700) and the
 // file is written with 0600.
-func (s *FileStore) Save(tok Token) error {
+func (s *FileStore) Save(tok *Token) error {
 	dir := filepath.Dir(s.Path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating token store directory: %w", err)
 	}
-	data, err := json.Marshal(tok)
+	data, err := json.Marshal(tok) //nolint:gosec // G117: persisting the token is the purpose of this store
 	if err != nil {
 		return fmt.Errorf("encoding token: %w", err)
 	}
@@ -63,18 +63,18 @@ func (s *FileStore) Save(tok Token) error {
 	}
 	tmpName := tmp.Name()
 	// Ignore cleanup errors; on success the rename already moved the file.
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("setting token file permissions: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("writing token file: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("syncing token file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

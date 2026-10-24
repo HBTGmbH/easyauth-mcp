@@ -22,6 +22,7 @@ make check     # fmt-check + vet + test (what a PR must pass, writes nothing)
 make build     # build bin/easyauth-mcp
 make test      # go test ./...
 make cover     # tests with a coverage profile
+make lint      # golangci-lint run ./... (needs golangci-lint)
 make fmt       # gofmt -w .
 make tidy      # go mod tidy
 make clean     # remove build artifacts
@@ -33,10 +34,37 @@ Under the hood:
 go build ./...
 go test ./... -race
 go vet ./...
-gofmt -l .     # must be empty
+golangci-lint run ./...   # configured in .golangci.yml
+gofmt -l .                # must be empty
 ```
 
-Before finishing: `make fmt && make check`.
+Before finishing: `make fmt && make check && make lint`.
+
+## CI
+
+- `.github/workflows/ci.yaml` - `make fmt-check`, `make vet`, `make build`,
+  `make test` and a cross-build on push/PR.
+- `.github/workflows/release.yaml` + `.goreleaser.yaml` - release binaries on
+  `v*` tags. Validate config changes with `goreleaser check`.
+- `.github/workflows/golangci-lint.yaml` + `.golangci.yml` - golangci-lint
+  (pinned version) on push/PR. Only linters that find bugs or security issues
+  are enabled, no style linters; gosec and gocritic run with every rule.
+  - Discard deliberately ignored errors explicitly (`_, _ = fmt.Fprintf(...)`,
+    `defer func() { _ = resp.Body.Close() }()`).
+  - Pass large structs by pointer and range over them by index (gocritic
+    `hugeParam`/`rangeValCopy`); copy a pointer argument before changing it.
+  - Silence a false positive only at its site with
+    `//nolint:<linter> // <rule>: <reason>`, never by disabling the rule.
+- `.github/workflows/zizmor.yaml` - audits the workflows and Dependabot config
+  with [zizmor](https://docs.zizmor.sh/) (`pedantic` persona) on push/PR. Check
+  workflow changes locally with `zizmor --persona pedantic .`: pin actions to
+  a full commit SHA with a version comment, set `persist-credentials: false`
+  on checkout, keep `setup-go` caching off, declare `permissions: {}` at the
+  workflow level and grant (and comment) only what each job needs.
+- `.github/dependabot.yml` - weekly updates for GitHub Actions and Go modules,
+  with a 7-day cooldown.
+- CI must stay network-free: tests rely on `httptest`, never on real Entra or
+  backend APIs.
 
 ## Layout
 

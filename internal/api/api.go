@@ -92,7 +92,7 @@ func (c *Client) warn(msg string) {
 // Call builds and executes the request for tool with args and returns the
 // response body as text. Only arguments whose names appear in tool.ParamIn
 // are sent; anything else (including a removed "csv" parameter) is dropped.
-func (c *Client) Call(ctx context.Context, tool spec.Tool, args map[string]any) Result {
+func (c *Client) Call(ctx context.Context, tool *spec.Tool, args map[string]any) Result {
 	req, err := c.buildRequest(ctx, tool, args)
 	if err != nil {
 		if need, ok := errors.AsType[loginError](err); ok {
@@ -103,7 +103,8 @@ func (c *Client) Call(ctx context.Context, tool spec.Tool, args map[string]any) 
 
 	res := c.do(req)
 
-	if res.Status == http.StatusUnauthorized && c.Token != nil && c.Refresh != nil {
+	switch {
+	case res.Status == http.StatusUnauthorized && c.Token != nil && c.Refresh != nil:
 		c.warn("got 401, refreshing token and retrying once")
 		tok, err := c.Refresh(ctx)
 		if err != nil {
@@ -111,7 +112,7 @@ func (c *Client) Call(ctx context.Context, tool spec.Tool, args map[string]any) 
 			res.ErrorMessage = withBody("refreshing token after 401 failed: "+err.Error(), res.Body)
 			return res
 		}
-		req, err = c.buildRequestWithToken(ctx, tool, args, tok)
+		req, err = c.buildRequestWithToken(ctx, tool, args, &tok)
 		if err != nil {
 			return Result{IsError: true, ErrorMessage: err.Error()}
 		}
@@ -120,11 +121,11 @@ func (c *Client) Call(ctx context.Context, tool spec.Tool, args map[string]any) 
 			res.IsError = true
 			res.ErrorMessage = withBody("unauthorized after token refresh", res.Body)
 		}
-	} else if res.Status == http.StatusUnauthorized && c.Token != nil {
+	case res.Status == http.StatusUnauthorized && c.Token != nil:
 		// Token present but no way to force a renewed token: no retry.
 		res.IsError = true
 		res.ErrorMessage = withBody("unauthorized", res.Body)
-	} else if res.Status == http.StatusUnauthorized {
+	case res.Status == http.StatusUnauthorized:
 		// Static mode: nothing to refresh.
 		res.IsError = true
 		res.ErrorMessage = withBody("unauthorized", res.Body)
@@ -137,7 +138,7 @@ func (c *Client) Call(ctx context.Context, tool spec.Tool, args map[string]any) 
 	return res
 }
 
-func (c *Client) buildRequest(ctx context.Context, tool spec.Tool, args map[string]any) (*http.Request, error) {
+func (c *Client) buildRequest(ctx context.Context, tool *spec.Tool, args map[string]any) (*http.Request, error) {
 	var tok auth.Token
 	if c.Token != nil {
 		t, err := c.Token(ctx)
@@ -149,7 +150,7 @@ func (c *Client) buildRequest(ctx context.Context, tool spec.Tool, args map[stri
 		}
 		tok = t
 	}
-	return c.buildRequestWithToken(ctx, tool, args, tok)
+	return c.buildRequestWithToken(ctx, tool, args, &tok)
 }
 
 // loginError carries a device code so the tool handler can show it to the user
@@ -162,7 +163,7 @@ func (e loginError) Error() string {
 	return "sign-in required"
 }
 
-func (c *Client) buildRequestWithToken(ctx context.Context, tool spec.Tool, args map[string]any, tok auth.Token) (*http.Request, error) {
+func (c *Client) buildRequestWithToken(ctx context.Context, tool *spec.Tool, args map[string]any, tok *auth.Token) (*http.Request, error) {
 	rawURL, body, headerArgs, err := c.buildTarget(tool, args)
 	if err != nil {
 		return nil, err
@@ -210,7 +211,7 @@ func (c *Client) buildRequestWithToken(ctx context.Context, tool spec.Tool, args
 // buildTarget resolves path parameters, appends query parameters and, when a
 // body is sent, marshals body arguments. It returns the absolute URL, an
 // optional request body and the header parameters to set.
-func (c *Client) buildTarget(tool spec.Tool, args map[string]any) (string, []byte, map[string]string, error) {
+func (c *Client) buildTarget(tool *spec.Tool, args map[string]any) (string, []byte, map[string]string, error) { //nolint:gocritic // unnamedResult: the names would collide with locals
 	if tool.ParamIn == nil {
 		return "", nil, nil, fmt.Errorf("tool has no parameter metadata")
 	}
@@ -274,7 +275,7 @@ func (c *Client) buildTarget(tool spec.Tool, args map[string]any) (string, []byt
 
 // resolvePath substitutes every {name} placeholder with the matching path
 // argument. Path arguments are validated against traversal before escaping.
-func resolvePath(tool spec.Tool, args map[string]any) (string, error) {
+func resolvePath(tool *spec.Tool, args map[string]any) (string, error) {
 	path := tool.Path
 	for _, name := range pathParamNames(tool.Path) {
 		value, ok := args[name]
@@ -333,9 +334,7 @@ func (c *Client) do(req *http.Request) Result {
 	if err != nil {
 		return Result{IsError: true, ErrorMessage: "request failed: " + transportErrorText(err)}
 	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
 
 	limit := c.maxBody()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
@@ -436,11 +435,11 @@ func stringValue(value any) (string, bool) {
 }
 
 // truncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune.
-func truncateUTF8(s string, max int) string {
-	if len(s) <= max {
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	cut := max
+	cut := limit
 	for cut > 0 && s[cut]&0xC0 == 0x80 { // back off continuation bytes
 		cut--
 	}

@@ -118,7 +118,7 @@ Flags:
 			configErr = err
 			return
 		}
-		configErr = fmt.Errorf("%v; %w", configErr, err)
+		configErr = fmt.Errorf("%w; %w", configErr, err)
 	}
 
 	if s.BaseURL == "" {

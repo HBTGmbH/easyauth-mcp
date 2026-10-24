@@ -56,7 +56,7 @@ func run(args []string, stderr io.Writer) int {
 	// the real tools it exposes a single setup-hint tool whose call returns the
 	// actionable error. Only unexpected programming errors may still terminate
 	// the process.
-	tools, toolsErr := loadTools(s)
+	tools, toolsErr := loadTools(ctx, &s)
 	var unauthorized *spec.ErrUnauthorized
 	specNeedsAuth := toolsErr != nil && s.ConfigError == nil && errors.As(toolsErr, &unauthorized)
 	if specNeedsAuth {
@@ -64,44 +64,44 @@ func run(args []string, stderr io.Writer) int {
 		// header (if configured) or with an access token that is already
 		// available. Without a token, a later sign-in tool loads the spec after
 		// the user has signed in.
-		if data, err := loadSpecAuthenticated(ctx, s, stderr); err == nil {
-			tools, toolsErr = buildTools(data, s)
+		if data, err := loadSpecAuthenticated(ctx, &s, stderr); err == nil {
+			tools, toolsErr = buildTools(data, &s)
 			specNeedsAuth = false
 		}
 	}
 	// registrar installs the real tools on demand. It is shared with the
 	// sign-in tool so tools become available right after a successful login,
 	// without restarting the server.
-	reg := &registrar{server: server, settings: s, stderr: stderr}
+	reg := &registrar{server: server, settings: &s, stderr: stderr}
 
 	switch {
 	case s.ConfigError != nil:
-		registerHelpTool(server, s, s.ConfigError)
-		fmt.Fprintf(stderr, "easyauth-mcp: not configured: %v\n", s.ConfigError)
+		registerHelpTool(server, &s, s.ConfigError)
+		_, _ = fmt.Fprintf(stderr, "easyauth-mcp: not configured: %v\n", s.ConfigError)
 	case specNeedsAuth:
 		registerSignInTool(server, reg)
-		fmt.Fprintln(stderr, "easyauth-mcp: spec requires a sign-in; exposing easyauth_sign_in")
+		_, _ = fmt.Fprintln(stderr, "easyauth-mcp: spec requires a sign-in; exposing easyauth_sign_in")
 	case toolsErr != nil:
-		registerHelpTool(server, s, toolsErr)
-		fmt.Fprintf(stderr, "easyauth-mcp: spec error: %v\n", toolsErr)
+		registerHelpTool(server, &s, toolsErr)
+		_, _ = fmt.Fprintf(stderr, "easyauth-mcp: spec error: %v\n", toolsErr)
 	case len(tools) == 0:
-		registerHelpTool(server, s, fmt.Errorf("the OpenAPI spec produced no tools with the current filter"))
-		fmt.Fprintln(stderr, "easyauth-mcp: the spec produced no tools with the current filter")
+		registerHelpTool(server, &s, fmt.Errorf("the OpenAPI spec produced no tools with the current filter"))
+		_, _ = fmt.Fprintln(stderr, "easyauth-mcp: the spec produced no tools with the current filter")
 	default:
 		if err := reg.install(ctx, tools); err != nil {
 			// Missing/invalid auth settings belong to the configuration, so
 			// report them per call instead of exiting too.
-			registerHelpTool(server, s, err)
-			fmt.Fprintf(stderr, "easyauth-mcp: authentication not configured: %v\n", err)
+			registerHelpTool(server, &s, err)
+			_, _ = fmt.Fprintf(stderr, "easyauth-mcp: authentication not configured: %v\n", err)
 			break
 		}
-		fmt.Fprintf(stderr, "easyauth-mcp: serving %d tool(s) from %s\n", len(tools), s.BaseURL)
+		_, _ = fmt.Fprintf(stderr, "easyauth-mcp: serving %d tool(s) from %s\n", len(tools), s.BaseURL)
 	}
 
 	// The stdio transport owns os.Stdin/os.Stdout; stdout must carry nothing
 	// but JSON-RPC, which is why stdout is not written to anywhere else.
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
-		fmt.Fprintln(stderr, "error:", err)
+		_, _ = fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
 	return 0
@@ -109,15 +109,15 @@ func run(args []string, stderr io.Writer) int {
 
 // loadTools reads and parses the spec. A failure is returned to run, which
 // turns it into a setup hint instead of terminating.
-func loadTools(s settings) ([]spec.Tool, error) {
-	data, err := spec.Load(s.OpenAPI)
+func loadTools(ctx context.Context, s *settings) ([]spec.Tool, error) {
+	data, err := spec.Load(ctx, s.OpenAPI)
 	if err != nil {
 		return nil, err
 	}
 	return buildTools(data, s)
 }
 
-func buildTools(data []byte, s settings) ([]spec.Tool, error) {
+func buildTools(data []byte, s *settings) ([]spec.Tool, error) {
 	spec.SetDeniedTags(s.DenyTags)
 	return spec.Build(data, spec.Filter{
 		PathPrefix:     s.PathPrefix,
@@ -133,9 +133,9 @@ func buildTools(data []byte, s settings) ([]spec.Tool, error) {
 // It must never block the server start on an interactive login: only a token
 // that is already available (cached or refreshable) is used. Without one, the
 // caller keeps the setup hint and the user signs in through a tool call.
-func loadSpecAuthenticated(ctx context.Context, s settings, stderr io.Writer) ([]byte, error) {
+func loadSpecAuthenticated(ctx context.Context, s *settings, stderr io.Writer) ([]byte, error) {
 	if s.AuthHeader != "" {
-		return spec.LoadWithHeader(s.OpenAPI, staticHeaders(s))
+		return spec.LoadWithHeader(ctx, s.OpenAPI, staticHeaders(s))
 	}
 
 	session, err := buildSession(s, stderr)
@@ -146,12 +146,12 @@ func loadSpecAuthenticated(ctx context.Context, s settings, stderr io.Writer) ([
 	if err != nil {
 		return nil, err
 	}
-	return spec.LoadWithHeader(s.OpenAPI, tok.Header())
+	return spec.LoadWithHeader(ctx, s.OpenAPI, tok.Header())
 }
 
 // buildClient wires either the static header mode (stage 1) or the device code
 // auth (stage 3) into the generic API client.
-func buildClient(_ context.Context, s settings, stderr io.Writer) (*api.Client, error) {
+func buildClient(_ context.Context, s *settings, stderr io.Writer) (*api.Client, error) {
 	client := api.NewClient(s.BaseURL, nil)
 	client.Log = stderr
 	client.Static = staticHeaders(s)
@@ -174,7 +174,7 @@ func buildClient(_ context.Context, s settings, stderr io.Writer) (*api.Client, 
 }
 
 // staticHeaders returns the headers for the static auth mode (stage 1).
-func staticHeaders(s settings) http.Header {
+func staticHeaders(s *settings) http.Header {
 	return headers(map[string]string{
 		"Authorization":            s.AuthHeader,
 		"x-ms-client-principal-id": s.PrincipalID,
@@ -184,7 +184,7 @@ func staticHeaders(s settings) http.Header {
 // buildSession validates the auth settings and returns a shared device-code
 // session. One Session serves all tool calls and the spec fetch so refreshes
 // and the login are serialized.
-func buildSession(s settings, stderr io.Writer) (*auth.Session, error) {
+func buildSession(s *settings, stderr io.Writer) (*auth.Session, error) {
 	var missing []string
 	if s.TenantID == "" {
 		missing = append(missing, "--tenant-id/EASYAUTH_TENANT_ID")
@@ -206,7 +206,7 @@ func buildSession(s settings, stderr io.Writer) (*auth.Session, error) {
 		}
 	}
 
-	return auth.NewSession(auth.NewAuth(auth.AuthConfig{
+	return auth.NewSession(auth.NewAuth(&auth.AuthConfig{
 		LoginBase: s.LoginBase,
 		TenantID:  s.TenantID,
 		ClientID:  s.ClientID,
@@ -217,7 +217,8 @@ func buildSession(s settings, stderr io.Writer) (*auth.Session, error) {
 }
 
 func registerTools(server *mcp.Server, tools []spec.Tool, client *api.Client) {
-	for _, tool := range tools {
+	for idx := range tools {
+		tool := &tools[idx]
 		server.AddTool(&mcp.Tool{
 			Name:        tool.Name,
 			Description: tool.Description,
@@ -275,7 +276,7 @@ func headers(values map[string]string) map[string][]string {
 // takes effect immediately; no restart is needed.
 type registrar struct {
 	server   *mcp.Server
-	settings settings
+	settings *settings
 	stderr   io.Writer
 
 	mu        sync.Mutex
