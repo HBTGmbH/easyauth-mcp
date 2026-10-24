@@ -66,8 +66,9 @@ func (s *Session) Token(ctx context.Context) (Token, error) {
 	}
 }
 
-// Login forces a fresh device login and blocks until it completes. Use it for
-// interactive setup (--init), where blocking is fine.
+// Login forces a fresh device login and blocks until it completes. The MCP server
+// never calls it; sign-in runs non-blocking through Token, which polls in the
+// background and returns ErrLoginRequired with the device code until confirmed.
 func (s *Session) Login(ctx context.Context) (Token, error) {
 	tok, err := s.auth.Login(ctx)
 	if err != nil {

@@ -461,7 +461,7 @@ func withBody(message, body string) string {
 // contains no secrets: user_code and verification_uri are meant for the user.
 func loginMessage(d auth.DeviceLogin) string {
 	if d.VerificationURI == "" || d.UserCode == "" {
-		return "Sign-in required. Run `easyauth-mcp --init` once in a terminal to sign in, then retry."
+		return "Sign-in required. Call the easyauth_sign_in tool to start the device code sign-in, then retry."
 	}
 	return fmt.Sprintf(
 		"Sign-in required. Open %s and enter the code %s, then run this tool again. "+
