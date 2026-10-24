@@ -1,0 +1,42 @@
+# Paths AI tooling should not read or feed into a model context.
+# Complements .gitignore; entries apply even when a path is tracked.
+
+# IDE and editor state (per-machine, noisy, no project knowledge)
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Build artifacts and caches
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+coverage.out
+coverage.*
+
+# Local data and secrets: the token store must never reach a model context.
+*.local
+*.env
+.env
+*.token
+token.json
+credentials.json
+*.bak
+
+# API responses and exports can contain personal data.
+*.csv
+/api-responses/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Repository internals that carry no project knowledge
+.git/

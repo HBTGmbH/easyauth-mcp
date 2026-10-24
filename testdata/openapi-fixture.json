@@ -1,0 +1,685 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Example API",
+    "description": "Test fixture for an OpenAPI 3 API protected by EasyAuth",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "paths": {
+    "/api/favorite": {
+      "get": {
+        "tags": ["favorite"],
+        "summary": "Favoriten des angemeldeten Nutzers",
+        "responses": {
+          "200": {
+            "description": "List of favorites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FavoriteDTO"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["favorite"],
+        "summary": "Create favorite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created favorite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoriteDTO"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/favorite": {
+      "get": {
+        "tags": ["favorite"],
+        "summary": "Favoriten des angemeldeten Nutzers",
+        "responses": {
+          "200": {
+            "description": "List of favorites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FavoriteDTO"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daily-reports/list": {
+      "get": {
+        "tags": ["daily report"],
+        "summary": "Daily reports list",
+        "parameters": [
+          {
+            "name": "refDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "csv",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyReportData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["daily report"],
+        "summary": "Create daily reports",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyReportListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created daily reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyReportData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daily-reports/{employeeContractId}/list": {
+      "get": {
+        "tags": ["daily report"],
+        "summary": "Daily reports list for employee contract",
+        "parameters": [
+          {
+            "name": "employeeContractId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "refDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyReportData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daily-working-reports/list": {
+      "get": {
+        "tags": ["daily report"],
+        "summary": "Daily working reports list",
+        "parameters": [
+          {
+            "name": "refDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily working reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyReportData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workingday/.me": {
+      "get": {
+        "tags": ["working days"],
+        "summary": "Working days of the current user",
+        "responses": {
+          "200": {
+            "description": "Working days",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkingDayData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workingday/.me/{date}": {
+      "get": {
+        "tags": ["working days"],
+        "summary": "Working day of the current user for a date",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Working day",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkingDayData"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workingday/{employeeSign}": {
+      "get": {
+        "tags": ["working days"],
+        "summary": "Working days of an employee",
+        "parameters": [
+          {
+            "name": "employeeSign",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Working days",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkingDayData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workingday/{employeeSign}/{date}": {
+      "get": {
+        "tags": ["working days"],
+        "summary": "Working day of an employee for a date",
+        "parameters": [
+          {
+            "name": "employeeSign",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Working day",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkingDayData"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/overtimes/status": {
+      "get": {
+        "tags": ["overtime"],
+        "summary": "Overtime status",
+        "operationId": "getOvertimeStatus",
+        "responses": {
+          "200": {
+            "description": "Overtime status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/employee-orders/list": {
+      "get": {
+        "tags": ["order"],
+        "summary": "Employee orders list",
+        "responses": {
+          "200": {
+            "description": "Employee orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeOrderData"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/execute": {
+      "get": {
+        "tags": ["report"],
+        "summary": "Execute report",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["json", "csv"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportData"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/etl/execute-all": {
+      "get": {
+        "tags": ["etl"],
+        "summary": "Execute all ETL jobs",
+        "responses": {
+          "200": {
+            "description": "Execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/etl/{etl-name}/execute": {
+      "get": {
+        "tags": ["etl"],
+        "summary": "Execute a single ETL job",
+        "parameters": [
+          {
+            "name": "etl-name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jira/replication/run": {
+      "post": {
+        "tags": ["jira-replication"],
+        "summary": "Run Jira replication",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replication result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/cache/clear": {
+      "post": {
+        "tags": ["auth-service"],
+        "summary": "Clear auth cache",
+        "responses": {
+          "200": {
+            "description": "Cache cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "EasyAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "AppServiceAuthSession"
+      },
+      "oauth2": {
+        "type": "openIdConnect",
+        "openIdConnectUrl": "http://localhost:8080/.well-known/openid-configuration"
+      }
+    },
+    "schemas": {
+      "FavoriteDTO": {
+        "type": "object",
+        "properties": {
+          "sign": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "orderSign": {
+            "type": "string"
+          },
+          "suborderSign": {
+            "type": "string"
+          },
+          "employeeSign": {
+            "type": "string"
+          }
+        }
+      },
+      "DailyReportData": {
+        "type": "object",
+        "properties": {
+          "sign": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "employeeSign": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "breakDuration": {
+            "type": "integer"
+          },
+          "duration": {
+            "type": "number"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "orderSign": {
+            "type": "string"
+          },
+          "suborderSign": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkingDayData": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "employeeSign": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "number"
+          },
+          "comment": {
+            "type": "string"
+          }
+        }
+      },
+      "EmployeeOrderData": {
+        "type": "object",
+        "properties": {
+          "sign": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "employeeSign": {
+            "type": "string"
+          },
+          "orderSign": {
+            "type": "string"
+          },
+          "suborderSign": {
+            "type": "string"
+          }
+        }
+      },
+      "ReportData": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "DailyReportListRequest": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "breakDuration": {
+            "type": "integer"
+          },
+          "dailyReports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyReportData"
+            }
+          }
+        }
+      }
+    }
+  }
+}

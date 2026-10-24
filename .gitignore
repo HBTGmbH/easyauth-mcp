@@ -1,0 +1,45 @@
+# Binaries
+/easyauth-mcp
+/easyauth-mcp.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.*
+
+# Go workspace / vendor
+go.work
+go.work.sum
+/vendor/
+
+# Local build artifacts
+/bin/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data and secrets
+*.local
+*.env
+.env
+*.token
+*.bak
+
+# Runtime artifacts from ad-hoc checks
+*.csv
+/backups/
