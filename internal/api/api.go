@@ -28,6 +28,7 @@ const (
 	defaultTimeout = 60 * time.Second
 	defaultMaxBody = 256 << 10 // 256 KiB
 	errorTailLimit = 500       // max body bytes appended to an error message
+	maxRedirects   = 10        // same limit as the http.Client default
 )
 
 // ignoredHeaders are never set from tool arguments; they are controlled by
@@ -73,7 +74,24 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: defaultTimeout}
+	return &http.Client{
+		Timeout:       defaultTimeout,
+		CheckRedirect: checkRedirect,
+	}
+}
+
+// checkRedirect makes redirect handling explicit. Go silently turns a POST
+// into a GET on 301/302/303, which would drop the body and produce a confusing
+// error from the backend. Such a redirect is reported instead, and a redirect
+// that keeps the method is followed up to the http.Client default of 10 hops.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	if method := via[len(via)-1].Method; req.Method != method {
+		return fmt.Errorf("redirect from %s to %s changes the HTTP method to %s", via[len(via)-1].URL.Redacted(), req.URL.Redacted(), req.Method)
+	}
+	return nil
 }
 
 func (c *Client) maxBody() int {
@@ -176,6 +194,14 @@ func (c *Client) buildRequestWithToken(ctx context.Context, tool *spec.Tool, arg
 	req, err := http.NewRequestWithContext(ctx, tool.Method, rawURL, reader)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
+	}
+	if body != nil {
+		// bytes.Reader implements io.ReaderAt, but GetBody is only set by
+		// http.NewRequest for *bytes.Buffer and *strings.Reader. Without it a
+		// redirect that keeps the method (307/308) cannot resend the body.
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(body)), nil
+		}
 	}
 
 	// Static headers first, then token headers only if static did not set them.

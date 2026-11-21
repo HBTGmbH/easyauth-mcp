@@ -728,3 +728,87 @@ func TestCallServerErrorKeepsBody(t *testing.T) {
 		t.Fatalf("error message lacks status or body: %q", res.ErrorMessage)
 	}
 }
+
+func TestCallRedirectChangingMethodIsError(t *testing.T) {
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("redirect target must not be reached, got %s", r.Method)
+	}))
+	defer final.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/elsewhere", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodPost,
+		Path:        "/api/x",
+		InputSchema: schema("date"),
+		ParamIn:     map[string]string{"date": "body"},
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{"date": "2025-09-09"})
+	if !res.IsError {
+		t.Fatal("a redirect that changes POST to GET must be reported as error")
+	}
+	if !strings.Contains(res.ErrorMessage, "changes the HTTP method") {
+		t.Fatalf("ErrorMessage = %q", res.ErrorMessage)
+	}
+}
+
+func TestCallRedirectKeepingMethodKeepsBody(t *testing.T) {
+	var gotMethod, gotBody string
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer final.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/target", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodPost,
+		Path:        "/api/x",
+		InputSchema: schema("date"),
+		ParamIn:     map[string]string{"date": "body"},
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{"date": "2025-09-09"})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method after 307 = %q, want POST", gotMethod)
+	}
+	if !strings.Contains(gotBody, `"date":"2025-09-09"`) {
+		t.Fatalf("body after 307 = %q", gotBody)
+	}
+}
+
+func TestCallRedirectLimit(t *testing.T) {
+	// A fixed relative Location loops on the same handler without echoing a
+	// tainted URL back into the response.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/api/x")
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{Method: http.MethodGet, Path: "/api/x", InputSchema: schema("opt"), ParamIn: paramIn("query", "opt")}
+
+	res := c.Call(context.Background(), &tool, nil)
+	if !res.IsError {
+		t.Fatal("an endless redirect loop must be reported as error")
+	}
+	if !strings.Contains(res.ErrorMessage, "redirects") {
+		t.Fatalf("ErrorMessage = %q", res.ErrorMessage)
+	}
+}
