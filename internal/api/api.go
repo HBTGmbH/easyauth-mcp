@@ -401,7 +401,7 @@ func pathParamNames(path string) []string {
 
 func isBodyMethod(method string) bool {
 	switch strings.ToUpper(method) {
-	case http.MethodPost, http.MethodPut, http.MethodPatch:
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		return true
 	default:
 		return false

@@ -812,3 +812,101 @@ func TestCallRedirectLimit(t *testing.T) {
 		t.Fatalf("ErrorMessage = %q", res.ErrorMessage)
 	}
 }
+
+func TestCallDeleteSendsJSONBody(t *testing.T) {
+	var gotMethod, gotContentType, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodDelete,
+		Path:        "/api/daily-reports/",
+		InputSchema: schema("date", "duration"),
+		ParamIn:     map[string]string{"date": "body", "duration": "body"},
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"date":     "2026-11-20",
+		"duration": "01:00",
+	})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotContentType != "application/json" {
+		t.Fatalf("Content-Type = %q", gotContentType)
+	}
+	if !strings.Contains(gotBody, `"date":"2026-11-20"`) || !strings.Contains(gotBody, `"duration":"01:00"`) {
+		t.Fatalf("body = %q", gotBody)
+	}
+}
+
+func TestCallDeleteWithoutBodyFieldsSendsNoBody(t *testing.T) {
+	var gotMethod string
+	var gotContentType string
+	var gotBodyLen int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBodyLen = len(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodDelete,
+		Path:        "/api/daily-reports/{id}",
+		InputSchema: schema("id"),
+		ParamIn:     map[string]string{"id": "path"},
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{"id": float64(7)})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotContentType != "" {
+		t.Fatalf("Content-Type = %q, want none without a body", gotContentType)
+	}
+	if gotBodyLen != 0 {
+		t.Fatalf("body length = %d, want 0", gotBodyLen)
+	}
+}
+
+func TestCallGetWithBodyFieldsStillRejected(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/x",
+		InputSchema: schema("date"),
+		ParamIn:     map[string]string{"date": "body"},
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{"date": "2025-09-09"})
+	if !res.IsError || !strings.Contains(res.ErrorMessage, "does not take a body") {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("server calls = %d, want 0", calls.Load())
+	}
+}
