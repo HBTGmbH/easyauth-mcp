@@ -438,3 +438,71 @@ func TestSignInSuccessMentionsTools(t *testing.T) {
 		t.Fatalf("short list must not be truncated: %q", all)
 	}
 }
+
+func TestStdioWarnsAboutSkippedWriteMethods(t *testing.T) {
+	bin := buildBinary(t)
+	session := newSession(t, bin,
+		"EASYAUTH_BASE_URL=http://localhost:9",
+		"EASYAUTH_OPENAPI="+filepath.Join("..", "..", "testdata", "openapi-fixture.json"),
+		"EASYAUTH_AUTH_HEADER=Bearer x",
+		"EASYAUTH_ALLOWED_TAGS=daily report",
+		"EASYAUTH_ALLOWED_METHODS=GET",
+	)
+	defer func() { _ = session.Close() }()
+
+	init := session.InitializeResult()
+	if init == nil {
+		t.Fatal("no initialize result")
+	}
+	if !strings.Contains(init.Instructions, "not exposed because their method is not allowed") {
+		t.Fatalf("instructions lack the write-method warning: %q", init.Instructions)
+	}
+	if !strings.Contains(init.Instructions, "POST") {
+		t.Fatalf("instructions do not name the method: %q", init.Instructions)
+	}
+	if !strings.Contains(init.Instructions, "EASYAUTH_ALLOWED_METHODS") {
+		t.Fatalf("instructions do not name the setting: %q", init.Instructions)
+	}
+}
+
+func TestStdioNoWriteMethodWarningWhenAllowed(t *testing.T) {
+	bin := buildBinary(t)
+	session := newSession(t, bin,
+		"EASYAUTH_BASE_URL=http://localhost:9",
+		"EASYAUTH_OPENAPI="+filepath.Join("..", "..", "testdata", "openapi-fixture.json"),
+		"EASYAUTH_AUTH_HEADER=Bearer x",
+		"EASYAUTH_ALLOWED_TAGS=daily report",
+		"EASYAUTH_ALLOWED_METHODS=GET,POST",
+	)
+	defer func() { _ = session.Close() }()
+
+	init := session.InitializeResult()
+	if init == nil {
+		t.Fatal("no initialize result")
+	}
+	if strings.Contains(init.Instructions, "not exposed because their method is not allowed") {
+		t.Fatalf("unexpected warning when POST is allowed: %q", init.Instructions)
+	}
+}
+
+func TestWriteMethodWarning(t *testing.T) {
+	if got := writeMethodWarning(nil, []string{"GET"}); got != "" {
+		t.Fatalf("empty list must not warn, got %q", got)
+	}
+
+	got := writeMethodWarning([]spec.SkippedOperation{
+		{Method: "POST", Path: "/api/x"},
+		{Method: "DELETE", Path: "/api/x/{id}"},
+	}, []string{"GET"})
+	for _, want := range []string{
+		"2 write operation(s)",
+		"POST /api/x",
+		"DELETE /api/x/{id}",
+		"allowed: GET",
+		"EASYAUTH_ALLOWED_METHODS",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("warning %q lacks %q", got, want)
+		}
+	}
+}

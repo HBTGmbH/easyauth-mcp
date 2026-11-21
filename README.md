@@ -177,6 +177,12 @@ suffixes such as `..._1` are treated as artifacts and replaced.
 Read-only by default: enabling writes requires both
 `EASYAUTH_ALLOWED_METHODS=GET,POST` and an explicit tag allowlist.
 
+Write operations that the method filter drops are **reported, not silently
+hidden**: the server instructions returned on `initialize` list every skipped
+`POST`, `PUT`, `PATCH` and `DELETE` operation together with the setting to add.
+Without that hint an agent would only notice that a write task has no tool and
+might fall back to a read operation.
+
 ## Sign-in
 
 Two modes exist:
@@ -215,6 +221,9 @@ replace the Entra flow: set
 - `IsError` is set only for transport errors, token errors, `5xx`, and a `401`
   that persists after one refresh.
 - `401` triggers exactly one refresh and retry. `403` never refreshes.
+- Redirects are followed only while they keep the HTTP method. A `301`/`302`/`303`
+  would silently turn a `POST` into a `GET` and drop the body, so such a redirect
+  is reported as an error instead. A `307`/`308` resends the body.
 - Bodies are truncated at 256 KiB with a marker.
 - Response schemas are not part of the tool definition; the JSON is returned
   as text.

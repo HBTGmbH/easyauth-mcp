@@ -23,6 +23,12 @@ import (
 // version is overridable at build time via -ldflags.
 var version = "dev"
 
+// serverInstructions is returned to every client on initialize.
+const serverInstructions = "This server exposes the operations of an OpenAPI-described API as tools. " +
+	"If easyauth_sign_in is available, call it: it returns a device code, the user " +
+	"confirms it in a browser, and calling it again completes the sign-in and registers " +
+	"the API tools immediately. No server restart is needed at any point."
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr))
 }
@@ -39,16 +45,6 @@ func run(args []string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "easyauth-mcp",
-		Version: version,
-	}, &mcp.ServerOptions{
-		Instructions: "This server exposes the operations of an OpenAPI-described API as tools. " +
-			"If easyauth_sign_in is available, call it: it returns a device code, the user " +
-			"confirms it in a browser, and calling it again completes the sign-in and registers " +
-			"the API tools immediately. No server restart is needed at any point.",
-	})
 
 	// Never exit on configuration or spec problems: an MCP client only sees a
 	// closed stdio connection ("Connection closed") and cannot tell the user
@@ -69,6 +65,21 @@ func run(args []string, stderr io.Writer) int {
 			specNeedsAuth = false
 		}
 	}
+
+	var skipped []spec.SkippedOperation
+	if toolsErr == nil && s.ConfigError == nil {
+		skipped = buildSkipped(ctx, &s)
+	}
+	instructions := serverInstructions
+	if warning := writeMethodWarning(skipped, s.AllowedMeths); warning != "" {
+		instructions += "\n\n" + warning
+		_, _ = fmt.Fprintln(stderr, "easyauth-mcp: "+warning)
+	}
+
+	server := mcp.NewServer(&mcp.Implementation{
+		Name:    "easyauth-mcp",
+		Version: version,
+	}, &mcp.ServerOptions{Instructions: instructions})
 	// registrar installs the real tools on demand. It is shared with the
 	// sign-in tool so tools become available right after a successful login,
 	// without restarting the server.
@@ -117,9 +128,46 @@ func loadTools(ctx context.Context, s *settings) ([]spec.Tool, error) {
 	return buildTools(data, s)
 }
 
+// buildSkipped re-derives the write operations the method filter dropped. It is
+// best effort: a spec that cannot be loaded yields no list, because the caller
+// already reports the load failure itself.
+func buildSkipped(ctx context.Context, s *settings) []spec.SkippedOperation {
+	data, err := spec.Load(ctx, s.OpenAPI)
+	if err != nil {
+		return nil
+	}
+	res, err := buildToolsWith(data, s)
+	if err != nil {
+		return nil
+	}
+	return res.SkippedWriteMethods
+}
+
+// writeMethodWarning turns dropped write operations into one actionable hint.
+// The message names the configuration variable so the agent can tell the user
+// exactly what to change instead of retrying a call that cannot work.
+func writeMethodWarning(skipped []spec.SkippedOperation, allowed []string) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	ops := make([]string, 0, len(skipped))
+	for _, op := range skipped {
+		ops = append(ops, op.Method+" "+op.Path)
+	}
+	return fmt.Sprintf(
+		"%d write operation(s) are not exposed because their method is not allowed (allowed: %s): %s. "+
+			"To use them, add the method to EASYAUTH_ALLOWED_METHODS / --allowed-methods and restart.",
+		len(ops), strings.Join(allowed, ","), strings.Join(ops, ", "))
+}
+
 func buildTools(data []byte, s *settings) ([]spec.Tool, error) {
+	res, err := buildToolsWith(data, s)
+	return res.Tools, err
+}
+
+func buildToolsWith(data []byte, s *settings) (spec.BuildResult, error) {
 	spec.SetDeniedTags(s.DenyTags)
-	return spec.Build(data, spec.Filter{
+	return spec.BuildWith(data, spec.Filter{
 		PathPrefix:     s.PathPrefix,
 		AllowedTags:    s.AllowedTags,
 		AllowedMethods: s.AllowedMeths,

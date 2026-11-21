@@ -76,11 +76,13 @@ Before finishing: `make fmt && make check && make lint`.
 - `cmd/easyauth-mcp/setup.go` - `easyauth_help` (read-only diagnosis) and
   `easyauth_sign_in` (device code, then installs the real tools).
 - `internal/spec` - OpenAPI to tool conversion: loading, filtering, naming,
-  input schemas, and the `ParamIn` map.
+  input schemas, and the `ParamIn` map. `BuildWith` additionally reports write
+  operations that the method filter dropped.
 - `internal/auth` - Entra device code flow, token store, refresh, and the
   `Session` that keeps the login non-blocking.
 - `internal/api` - generic HTTP executor: path/query/header/body routing via
-  `ParamIn`, 401 retry, body limit, error classification.
+  `ParamIn`, 401 retry, body limit, error classification, and method-preserving
+  redirect handling.
 
 ## Important facts
 

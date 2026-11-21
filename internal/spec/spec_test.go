@@ -626,3 +626,122 @@ func TestLoadRemoteWithinSizeLimit(t *testing.T) {
 		t.Errorf("got %d bytes, want 16", len(got))
 	}
 }
+
+func TestBuildWithReportsSkippedWriteMethods(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.0.3",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/things": {
+      "get": {"operationId": "listThings", "responses": {"200": {"description": "ok"}}},
+      "post": {"operationId": "createThing", "responses": {"200": {"description": "ok"}}}
+    },
+    "/api/things/{id}": {
+      "get": {"operationId": "getThing", "responses": {"200": {"description": "ok"}}},
+      "put": {"operationId": "replaceThing", "responses": {"200": {"description": "ok"}}},
+      "patch": {"operationId": "patchThing", "responses": {"200": {"description": "ok"}}},
+      "delete": {"operationId": "deleteThing", "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET"}})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+	if len(res.Tools) != 2 {
+		t.Fatalf("expected 2 GET tools, got %d", len(res.Tools))
+	}
+
+	want := map[string]string{
+		"POST":   "/api/things",
+		"PUT":    "/api/things/{id}",
+		"PATCH":  "/api/things/{id}",
+		"DELETE": "/api/things/{id}",
+	}
+	if len(res.SkippedWriteMethods) != len(want) {
+		t.Fatalf("SkippedWriteMethods = %v, want %d entries", res.SkippedWriteMethods, len(want))
+	}
+	for _, skipped := range res.SkippedWriteMethods {
+		wantPath, ok := want[skipped.Method]
+		if !ok {
+			t.Errorf("unexpected skipped method %q", skipped.Method)
+			continue
+		}
+		if skipped.Path != wantPath {
+			t.Errorf("%s path = %q, want %q", skipped.Method, skipped.Path, wantPath)
+		}
+	}
+}
+
+func TestBuildWithReportsNothingWhenMethodsAllowed(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.0.3",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/things": {
+      "post": {"operationId": "createThing", "responses": {"200": {"description": "ok"}}},
+      "delete": {"operationId": "deleteThings", "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET", "POST", "DELETE"}})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+	if len(res.Tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(res.Tools))
+	}
+	if len(res.SkippedWriteMethods) != 0 {
+		t.Fatalf("SkippedWriteMethods = %v, want none", res.SkippedWriteMethods)
+	}
+}
+
+func TestBuildWithIgnoresSkippedMethodsOutsideTagFilter(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.0.3",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/things": {
+      "post": {"operationId": "createThing", "tags": ["hidden"], "responses": {"200": {"description": "ok"}}}
+    },
+    "/api/other": {
+      "post": {"operationId": "createOther", "tags": ["daily report"], "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET"}, AllowedTags: []string{"daily report"}})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+	if len(res.SkippedWriteMethods) != 1 {
+		t.Fatalf("SkippedWriteMethods = %v, want only the allowed-tag one", res.SkippedWriteMethods)
+	}
+	if res.SkippedWriteMethods[0].Path != "/api/other" {
+		t.Fatalf("path = %q, want /api/other", res.SkippedWriteMethods[0].Path)
+	}
+}
+
+func TestBuildWithIgnoresGetAndDeprecated(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.0.3",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/things": {
+      "head": {"operationId": "headThings", "responses": {"200": {"description": "ok"}}},
+      "options": {"operationId": "optionsThings", "responses": {"200": {"description": "ok"}}},
+      "post": {"operationId": "oldThing", "deprecated": true, "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET"}})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+	if len(res.SkippedWriteMethods) != 0 {
+		t.Fatalf("SkippedWriteMethods = %v, want none", res.SkippedWriteMethods)
+	}
+}

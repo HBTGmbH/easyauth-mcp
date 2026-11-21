@@ -74,6 +74,14 @@ type Tool struct {
 	OperationID string
 }
 
+// SkippedOperation records an operation that exists in the spec but did not
+// become a tool because its HTTP method is not allowed. Callers report this so
+// an agent does not silently fall back to a read operation for a write task.
+type SkippedOperation struct {
+	Method string
+	Path   string
+}
+
 // DefaultFilter restricts tools to GET operations below /api/. Operations
 // tagged with any DeniedTags (etl, jira-replication, auth-service) are
 // excluded because AllowedTags is empty.
@@ -142,24 +150,44 @@ func loadRemote(ctx context.Context, location string, header http.Header) ([]byt
 	return data, nil
 }
 
+// BuildResult is the outcome of BuildWith.
+type BuildResult struct {
+	Tools []Tool
+	// SkippedWriteMethods lists write operations (POST, PUT, PATCH, DELETE) that
+	// were dropped because their method is not allowed. A caller reports this to
+	// the agent so it does not silently fall back to reading where it should
+	// write.
+	SkippedWriteMethods []SkippedOperation
+}
+
 // Build parses an OpenAPI 3 document and derives the MCP tools matching filter.
 // The document is only parsed, never validated. External $refs are rejected.
 func Build(data []byte, filter Filter) ([]Tool, error) {
+	res, err := BuildWith(data, filter)
+	if err != nil {
+		return nil, err
+	}
+	return res.Tools, nil
+}
+
+// BuildWith is Build plus the write operations that the method filter dropped.
+func BuildWith(data []byte, filter Filter) (BuildResult, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = false
 
 	doc, err := loader.LoadFromData(data)
 	if err != nil {
-		return nil, fmt.Errorf("parse openapi document: %w", err)
+		return BuildResult{}, fmt.Errorf("parse openapi document: %w", err)
 	}
 
 	filter = normalizeFilter(filter)
 
 	if doc.Paths == nil {
-		return nil, nil
+		return BuildResult{}, nil
 	}
 
 	var tools []Tool
+	var skipped []SkippedOperation
 	usedNames := make(map[string]struct{})
 
 	for _, path := range doc.Paths.InMatchingOrder() {
@@ -178,6 +206,9 @@ func Build(data []byte, filter Filter) ([]Tool, error) {
 				continue
 			}
 			if !methodAllowed(method, filter.AllowedMethods) {
+				if isWriteMethod(method) && tagsAllowed(operation.Tags, filter.AllowedTags) {
+					skipped = append(skipped, SkippedOperation{Method: strings.ToUpper(method), Path: path})
+				}
 				continue
 			}
 			if !tagsAllowed(operation.Tags, filter.AllowedTags) {
@@ -201,7 +232,7 @@ func Build(data []byte, filter Filter) ([]Tool, error) {
 		}
 	}
 
-	return tools, nil
+	return BuildResult{Tools: tools, SkippedWriteMethods: skipped}, nil
 }
 
 func normalizeFilter(filter Filter) Filter {
@@ -253,6 +284,17 @@ func buildDescription(operation *openapi3.Operation, method, path string) string
 	parts = append(parts, method+" "+path)
 
 	return truncateUTF8(strings.Join(parts, "\n\n"), maxDescriptionLen)
+}
+
+// isWriteMethod reports whether method changes server state. DELETE counts: it
+// removes data. HEAD and OPTIONS do not.
+func isWriteMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 // truncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune.
