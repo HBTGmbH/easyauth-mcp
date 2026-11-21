@@ -23,7 +23,7 @@ func loadFixture(t *testing.T) []byte {
 	return data
 }
 
-func buildTools(t *testing.T, filter Filter) []Tool {
+func buildTools(t *testing.T, filter *Filter) []Tool {
 	t.Helper()
 	tools, err := Build(loadFixture(t), filter)
 	if err != nil {
@@ -64,7 +64,7 @@ func contains(items []string, want string) bool {
 }
 
 func TestBuildDefaultFilter(t *testing.T) {
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {
@@ -98,7 +98,7 @@ func TestConfiguredDeniedTagsAreExcluded(t *testing.T) {
 	t.Cleanup(func() { SetDeniedTags(nil) })
 	SetDeniedTags([]string{"etl", "jira-replication", "auth-service"})
 
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 	for _, tool := range tools {
 		for _, denied := range DeniedTags {
 			if toolHasTag(tool, denied) {
@@ -138,7 +138,7 @@ func TestDenyLogicInline(t *testing.T) {
 	SetDeniedTags([]string{"etl"})
 	t.Cleanup(func() { SetDeniedTags(nil) })
 
-	denied, err := Build(inline, Filter{})
+	denied, err := Build(inline, &Filter{})
 	if err != nil {
 		t.Fatalf("Build denied: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestDenyLogicInline(t *testing.T) {
 		t.Errorf("plain GET must be present")
 	}
 
-	allowed, err := Build(inline, Filter{AllowedTags: []string{"etl"}})
+	allowed, err := Build(inline, &Filter{AllowedTags: []string{"etl"}})
 	if err != nil {
 		t.Fatalf("Build allowed: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestBuildTagFilter(t *testing.T) {
 		AllowedTags:    []string{"favorite", "daily report", "working days", "overtime", "order", "report"},
 		AllowedMethods: []string{"GET"},
 	}
-	tools := buildTools(t, filter)
+	tools := buildTools(t, &filter)
 
 	if toolByName(tools, "get_api_daily_reports_list") == nil {
 		t.Errorf("expected GET daily reports list")
@@ -180,7 +180,7 @@ func TestBuildTagFilter(t *testing.T) {
 }
 
 func TestDailyReportsListSchema(t *testing.T) {
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 	tool := toolByName(tools, "get_api_daily_reports_list")
 	if tool == nil {
 		t.Fatal("tool get_api_daily_reports_list not found")
@@ -198,13 +198,32 @@ func TestDailyReportsListSchema(t *testing.T) {
 	if _, ok := props["days"]; !ok {
 		t.Errorf("expected property days, got %v", props)
 	}
+	// Nothing is hidden without configuration: the spec's csv parameter stays.
+	if _, ok := props["csv"]; !ok {
+		t.Errorf("csv must be present when no denied parameters are configured, got %v", props)
+	}
+}
+
+func TestDeniedParamsRemoveProperty(t *testing.T) {
+	t.Cleanup(func() { SetDeniedParams(nil) })
+	SetDeniedParams([]string{"csv"})
+
+	tools := buildTools(t, defaultFilterPtr())
+	tool := toolByName(tools, "get_api_daily_reports_list")
+	if tool == nil {
+		t.Fatal("tool get_api_daily_reports_list not found")
+	}
+	props := propertyNames(t, tool.InputSchema)
 	if _, ok := props["csv"]; ok {
-		t.Errorf("csv property must be removed")
+		t.Errorf("csv property must be removed when denied, got %v", props)
+	}
+	if _, ok := tool.ParamIn["csv"]; ok {
+		t.Error("denied parameter must not appear in ParamIn")
 	}
 }
 
 func TestReportsExecuteSchema(t *testing.T) {
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 	tool := toolByName(tools, "get_api_reports_execute")
 	if tool == nil {
 		t.Fatal("tool get_api_reports_execute not found")
@@ -227,7 +246,7 @@ func TestReportsExecuteSchema(t *testing.T) {
 }
 
 func TestWorkingDayNames(t *testing.T) {
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 
 	for _, name := range []string{
 		"get_api_workingday_by_employee_sign",
@@ -248,7 +267,7 @@ func TestWorkingDayNames(t *testing.T) {
     "/api/workingday/{employeeSign}/{date}": {"get": {"responses": {"200": {"description": "ok"}}}}
   }
 }`)
-	inline, err := Build(spec, DefaultFilter())
+	inline, err := Build(spec, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -260,7 +279,7 @@ func TestWorkingDayNames(t *testing.T) {
 }
 
 func TestOperationIDHandling(t *testing.T) {
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 	if toolByName(tools, "get_overtime_status") == nil {
 		t.Errorf("expected operationId-based name get_overtime_status")
 	}
@@ -279,7 +298,7 @@ func TestSpringDocSuffixFallsBackToPath(t *testing.T) {
     }
   }
 }`)
-	tools, err := Build(spec, DefaultFilter())
+	tools, err := Build(spec, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -301,7 +320,7 @@ func TestNameCollisionSuffix(t *testing.T) {
     "/api/c": {"get": {"operationId": "same", "responses": {"200": {"description": "ok"}}}}
   }
 }`)
-	tools, err := Build(spec, DefaultFilter())
+	tools, err := Build(spec, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -329,7 +348,7 @@ func TestDeprecatedExcluded(t *testing.T) {
     "/api/new": {"get": {"responses": {"200": {"description": "ok"}}}}
   }
 }`)
-	tools, err := Build(spec, DefaultFilter())
+	tools, err := Build(spec, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -359,7 +378,7 @@ func TestRequestBodyFlattening(t *testing.T) {
     }
   }
 }`)
-	tools, err := Build(spec, Filter{AllowedMethods: []string{"POST"}})
+	tools, err := Build(spec, &Filter{AllowedMethods: []string{"POST"}})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -400,7 +419,7 @@ func TestParameterReferenceResolved(t *testing.T) {
     }
   }
 }`)
-	tools, err := Build(spec, DefaultFilter())
+	tools, err := Build(spec, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -429,7 +448,7 @@ func TestHeaderFiltering(t *testing.T) {
     }
   }
 }`)
-	tools, err := Build(spec, DefaultFilter())
+	tools, err := Build(spec, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -484,13 +503,13 @@ func TestLoadRemoteError(t *testing.T) {
 }
 
 func TestParamIn(t *testing.T) {
-	tools := buildTools(t, DefaultFilter())
+	tools := buildTools(t, defaultFilterPtr())
 
 	cases := []struct {
 		tool string
 		want map[string]string
 	}{
-		{"get_api_daily_reports_list", map[string]string{"refDate": "query", "days": "query"}},
+		{"get_api_daily_reports_list", map[string]string{"refDate": "query", "days": "query", "csv": "query"}},
 		{"get_api_workingday_by_employee_sign", map[string]string{"employeeSign": "path"}},
 		{"get_api_reports_execute", map[string]string{"name": "query", "format": "query"}},
 	}
@@ -513,14 +532,14 @@ func TestParamIn(t *testing.T) {
 
 	daily := toolByName(tools, "get_api_daily_reports_list")
 	if daily != nil {
-		if _, ok := daily.ParamIn["csv"]; ok {
-			t.Errorf("csv must not appear in ParamIn")
+		if _, ok := daily.ParamIn["csv"]; !ok {
+			t.Errorf("csv must appear in ParamIn when not denied")
 		}
 	}
 }
 
 func TestParamInBody(t *testing.T) {
-	tools := buildTools(t, Filter{AllowedMethods: []string{"POST"}, AllowedTags: []string{"daily report"}})
+	tools := buildTools(t, &Filter{AllowedMethods: []string{"POST"}, AllowedTags: []string{"daily report"}})
 	tool := toolByName(tools, "post_api_daily_reports_list")
 	if tool == nil {
 		t.Fatal("post_api_daily_reports_list not found")
@@ -549,7 +568,7 @@ func TestParamInBodyCollision(t *testing.T) {
     }
   }
 }`)
-	tools, err := Build(inline, Filter{AllowedMethods: []string{"POST"}})
+	tools, err := Build(inline, &Filter{AllowedMethods: []string{"POST"}})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -576,7 +595,7 @@ func TestDescriptionTruncatedUTF8(t *testing.T) {
     "/api/long": {"get": {"summary": "` + desc + `", "responses": {"200": {"description": "ok"}}}}
   }
 }`)
-	tools, err := Build(inline, DefaultFilter())
+	tools, err := Build(inline, defaultFilterPtr())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -645,7 +664,7 @@ func TestBuildWithReportsSkippedWriteMethods(t *testing.T) {
   }
 }`)
 
-	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET"}})
+	res, err := BuildWith(inline, &Filter{AllowedMethods: []string{"GET"}})
 	if err != nil {
 		t.Fatalf("BuildWith: %v", err)
 	}
@@ -686,7 +705,7 @@ func TestBuildWithReportsNothingWhenMethodsAllowed(t *testing.T) {
   }
 }`)
 
-	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET", "POST", "DELETE"}})
+	res, err := BuildWith(inline, &Filter{AllowedMethods: []string{"GET", "POST", "DELETE"}})
 	if err != nil {
 		t.Fatalf("BuildWith: %v", err)
 	}
@@ -712,7 +731,7 @@ func TestBuildWithIgnoresSkippedMethodsOutsideTagFilter(t *testing.T) {
   }
 }`)
 
-	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET"}, AllowedTags: []string{"daily report"}})
+	res, err := BuildWith(inline, &Filter{AllowedMethods: []string{"GET"}, AllowedTags: []string{"daily report"}})
 	if err != nil {
 		t.Fatalf("BuildWith: %v", err)
 	}
@@ -737,11 +756,181 @@ func TestBuildWithIgnoresGetAndDeprecated(t *testing.T) {
   }
 }`)
 
-	res, err := BuildWith(inline, Filter{AllowedMethods: []string{"GET"}})
+	res, err := BuildWith(inline, &Filter{AllowedMethods: []string{"GET"}})
 	if err != nil {
 		t.Fatalf("BuildWith: %v", err)
 	}
 	if len(res.SkippedWriteMethods) != 0 {
 		t.Fatalf("SkippedWriteMethods = %v, want none", res.SkippedWriteMethods)
+	}
+}
+
+func TestExtraQueryOnlyOnConfiguredPaths(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/reports/execute": {
+      "get": {"operationId": "execute", "parameters": [
+        {"name": "reportId", "in": "query", "schema": {"type": "integer"}}
+      ], "responses": {"200": {"description": "ok"}}}
+    },
+    "/api/favorite": {
+      "get": {"operationId": "favorites", "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, &Filter{
+		AllowedMethods:  []string{"GET"},
+		ExtraQueryPaths: []string{"/api/reports/execute"},
+	})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+
+	exec := toolByName(res.Tools, "execute")
+	if exec == nil {
+		t.Fatal("execute not found")
+	}
+	if exec.ExtraQuery != "extraQuery" {
+		t.Errorf("ExtraQuery = %q, want extraQuery", exec.ExtraQuery)
+	}
+	if got := exec.ParamIn["extraQuery"]; got != "query" {
+		t.Errorf("ParamIn[extraQuery] = %q, want query", got)
+	}
+	props, ok := exec.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("input schema has no properties")
+	}
+	if _, ok := props["extraQuery"]; !ok {
+		t.Errorf("extraQuery missing from input schema: %v", props)
+	}
+
+	other := toolByName(res.Tools, "favorites")
+	if other == nil {
+		t.Fatal("favorites not found")
+	}
+	if other.ExtraQuery != "" {
+		t.Errorf("unconfigured path must not get extraQuery, got %q", other.ExtraQuery)
+	}
+	if _, ok := other.ParamIn["extraQuery"]; ok {
+		t.Error("unconfigured path must not declare extraQuery")
+	}
+}
+
+func TestExtraQueryDoesNotOverrideDeclaredParameter(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/x": {
+      "get": {"operationId": "x", "parameters": [
+        {"name": "extraQuery", "in": "query", "schema": {"type": "string"}}
+      ], "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, &Filter{
+		AllowedMethods:  []string{"GET"},
+		ExtraQueryPaths: []string{"/api/x"},
+	})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+	if len(res.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(res.Tools))
+	}
+	tool := res.Tools[0]
+	if tool.ExtraQuery != "" {
+		t.Errorf("declared extraQuery must not be treated as free-form, got %q", tool.ExtraQuery)
+	}
+	props, ok := tool.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("input schema has no properties: %v", tool.InputSchema)
+	}
+	declared, ok := props["extraQuery"].(map[string]any)
+	if !ok {
+		t.Fatalf("declared extraQuery missing: %v", props)
+	}
+	if declared["type"] != "string" {
+		t.Errorf("declared parameter was overwritten: %v", declared)
+	}
+}
+
+func TestExtraQueryIgnoresDuplicateMapping(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/reports/execute": {
+      "get": {"operationId": "execute", "responses": {"200": {"description": "ok"}}}
+    },
+    "/rest/reports/execute": {
+      "get": {"operationId": "executeRest", "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	res, err := BuildWith(inline, &Filter{
+		AllowedMethods:  []string{"GET"},
+		ExtraQueryPaths: []string{"/api/reports/execute"},
+	})
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+
+	for _, tool := range res.Tools {
+		switch tool.Path {
+		case "/api/reports/execute":
+			if tool.ExtraQuery == "" {
+				t.Errorf("configured path must expose extraQuery")
+			}
+		case "/rest/reports/execute":
+			if tool.ExtraQuery != "" {
+				t.Errorf("duplicate mapping must stay unchanged: %q", tool.ExtraQuery)
+			}
+		default:
+			t.Errorf("unexpected tool path %q", tool.Path)
+		}
+	}
+}
+
+// defaultFilterPtr returns the default filter by pointer without copying the
+// struct through a value parameter.
+func defaultFilterPtr() *Filter {
+	f := DefaultFilter()
+	return &f
+}
+
+func TestExtraQueryHintInDescription(t *testing.T) {
+	inline := []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/api/reports/execute": {
+      "get": {"operationId": "execute", "responses": {"200": {"description": "ok"}}}
+    }
+  }
+}`)
+
+	f := &Filter{AllowedMethods: []string{"GET"}, ExtraQueryPaths: []string{"/api/reports/execute"}}
+	res, err := BuildWith(inline, f)
+	if err != nil {
+		t.Fatalf("BuildWith: %v", err)
+	}
+	if len(res.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(res.Tools))
+	}
+	desc := res.Tools[0].Description
+	if !strings.Contains(desc, "extraQuery") {
+		t.Errorf("description lacks the extraQuery hint: %q", desc)
+	}
+	if !strings.Contains(desc, "rejected") {
+		t.Errorf("description does not mention rejection: %q", desc)
+	}
+	if len(desc) > maxDescriptionLen {
+		t.Errorf("description too long: %d", len(desc))
 	}
 }

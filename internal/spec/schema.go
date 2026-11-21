@@ -32,7 +32,7 @@ func buildInputSchema(operation *openapi3.Operation, pathItem *openapi3.PathItem
 			if param.In != in {
 				continue
 			}
-			if strings.EqualFold(param.Name, "csv") {
+			if ParamDenied(param.Name) {
 				continue
 			}
 			if in == openapi3.ParameterInHeader {

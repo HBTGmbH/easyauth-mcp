@@ -142,6 +142,8 @@ Precedence: **flag > environment variable > default**.
 | `EASYAUTH_DENY_TAGS`        | comma list of tags that never become tools; empty by default         | no          |
 | `EASYAUTH_ALLOWED_METHODS`  | comma list of HTTP methods (default `GET`)                           | no          |
 | `EASYAUTH_PATH_PREFIX`      | only paths with this prefix (default `/api/`)                        | no          |
+| `EASYAUTH_EXTRA_QUERY_PATHS` | comma list of paths whose tools accept undeclared query parameters  | no          |
+| `EASYAUTH_DENIED_PARAMS`    | comma list of parameter names that never reach a request             | no          |
 
 `EASYAUTH_DENY_TAGS` is strongly recommended when an API exposes `GET` endpoints
 with side effects (background jobs or replication triggers, for example). Because
@@ -183,6 +185,31 @@ hidden**: the server instructions returned on `initialize` list every skipped
 Without that hint an agent would only notice that a write task has no tool and
 might fall back to a read operation.
 
+### Undeclared query parameters
+
+Some APIs accept query names that only exist at runtime and cannot be declared
+in the spec, for example report parameters named after the variables in the
+report's SQL (`jahr=2025`, `von=date,VORMONAT`). Everything the spec does not
+declare is dropped, so such a path opts in explicitly:
+
+```bash
+EASYAUTH_EXTRA_QUERY_PATHS=/api/reports/execute
+```
+
+The listed tools get an additional `extraQuery` parameter — an object of name to
+value. Values are sent as strings (`{"jahr": "2025", "von": "date,VORMONAT"}`).
+The path must match the OpenAPI path exactly; a duplicate mapping such as
+`/rest/...` stays unchanged unless it is listed as well. Exactly declared
+parameters always win over values from `extraQuery`. Names in
+`EASYAUTH_DENIED_PARAMS` are rejected there too. Without the setting, no tool
+exposes `extraQuery`.
+
+Undocumented arguments are never dropped silently: a call with an argument the
+tool does not declare fails with a message naming the argument and, for an
+`extraQuery` tool, telling the caller to move it into that object. Names from the
+operation description are often meant as query parameters, so they must be
+nested, not passed beside `reportId`.
+
 ## Sign-in
 
 Two modes exist:
@@ -215,7 +242,8 @@ replace the Entra flow: set
 
 - Success returns the response **body** as text. The HTTP status is not part of
   the text; it only decides whether the result is an error. The `Accept` header is
-  always `application/json`; the `csv` query parameter is removed from the schemas.
+  always `application/json`; a parameter name in `EASYAUTH_DENIED_PARAMS` is
+  removed from the schemas and never sent.
 - Some APIs use `404` as a business result (e.g. an empty result set), not a
   failure. It is passed through as content with its status code.
 - `IsError` is set only for transport errors, token errors, `5xx`, and a `401`

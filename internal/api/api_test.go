@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -162,16 +163,16 @@ func TestCallQueryFiltersUnknownArgs(t *testing.T) {
 	res := c.Call(context.Background(), &tool, map[string]any{
 		"refDate": "2025-09-09",
 		"days":    float64(3),
-		"csv":     true,
+		"jhre":    "typo",
 	})
-	if res.IsError {
-		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	if !res.IsError {
+		t.Fatal("a typo must be reported, not dropped")
 	}
-	if query != "days=3&refDate=2025-09-09" {
-		t.Fatalf("query = %q", query)
+	if !strings.Contains(res.ErrorMessage, "jhre") {
+		t.Fatalf("ErrorMessage = %q", res.ErrorMessage)
 	}
-	if strings.Contains(query, "csv") {
-		t.Fatalf("csv must not be sent: %q", query)
+	if query != "" {
+		t.Fatalf("no request may be sent, query = %q", query)
 	}
 }
 
@@ -569,7 +570,6 @@ func TestCallPostSendsJSONBody(t *testing.T) {
 		"date":      "2025-09-09",
 		"startTime": "08:00",
 		"queryFlag": "yes",
-		"unknown":   "ignored",
 	})
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.ErrorMessage)
@@ -586,7 +586,7 @@ func TestCallPostSendsJSONBody(t *testing.T) {
 	if !strings.Contains(gotBody, `"date":"2025-09-09"`) || !strings.Contains(gotBody, `"startTime":"08:00"`) {
 		t.Fatalf("body = %q", gotBody)
 	}
-	if strings.Contains(gotBody, "id") || strings.Contains(gotBody, "unknown") || strings.Contains(gotBody, "queryFlag") {
+	if strings.Contains(gotBody, "id") || strings.Contains(gotBody, "queryFlag") {
 		t.Fatalf("body must only contain body args: %q", gotBody)
 	}
 }
@@ -908,5 +908,310 @@ func TestCallGetWithBodyFieldsStillRejected(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("server calls = %d, want 0", calls.Load())
+	}
+}
+
+func TestCallExtraQueryExpandsObject(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("reportId", "extraQuery"),
+		ParamIn:     map[string]string{"reportId": "query", "extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"reportId": float64(42),
+		"extraQuery": map[string]any{
+			"jahr": "2025",
+			"von":  "date,2025-09-01",
+			"kw":   "number,KW",
+		},
+	})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	}
+
+	q, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	want := map[string]string{"reportId": "42", "jahr": "2025", "von": "date,2025-09-01", "kw": "number,KW"}
+	for k, v := range want {
+		if got := q.Get(k); got != v {
+			t.Errorf("query %q = %q, want %q", k, got, v)
+		}
+	}
+	if _, present := q["extraQuery"]; present {
+		t.Errorf("extraQuery must be expanded, not sent literally: %q", gotQuery)
+	}
+}
+
+func TestCallExtraQueryNumberAndBoolUseStringForm(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("extraQuery"),
+		ParamIn:     map[string]string{"extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"extraQuery": map[string]any{"jahr": float64(2025), "all": true},
+	})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	}
+	q, _ := url.ParseQuery(gotQuery)
+	if q.Get("jahr") != "2025" {
+		t.Errorf("jahr = %q, want 2025", q.Get("jahr"))
+	}
+	if q.Get("all") != "true" {
+		t.Errorf("all = %q, want true", q.Get("all"))
+	}
+}
+
+func TestCallExtraQueryRejectsNonObject(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("extraQuery"),
+		ParamIn:     map[string]string{"extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	for _, bad := range []any{"jahr=2025", float64(1), []any{"a"}} {
+		res := c.Call(context.Background(), &tool, map[string]any{"extraQuery": bad})
+		if !res.IsError {
+			t.Errorf("value %v: expected error", bad)
+			continue
+		}
+		if !strings.Contains(res.ErrorMessage, "must be an object") {
+			t.Errorf("value %v: ErrorMessage = %q", bad, res.ErrorMessage)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("server calls = %d, want 0", calls.Load())
+	}
+}
+
+func TestCallExtraQueryRejectsReservedName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request must not be sent")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("extraQuery"),
+		ParamIn:     map[string]string{"extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	// Accept is set by the client for every request and must stay fixed.
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"extraQuery": map[string]any{"accept": "text/csv"},
+	})
+	if !res.IsError || !strings.Contains(res.ErrorMessage, "reserved query name") {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestCallExtraQueryRejectsDeniedName(t *testing.T) {
+	t.Cleanup(func() { spec.SetDeniedParams(nil) })
+	spec.SetDeniedParams([]string{"csv"})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request must not be sent")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("extraQuery"),
+		ParamIn:     map[string]string{"extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"extraQuery": map[string]any{"csv": "true"},
+	})
+	if !res.IsError || !strings.Contains(res.ErrorMessage, "denied query name") {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestCallDeniedParamDoesNotFail(t *testing.T) {
+	t.Cleanup(func() { spec.SetDeniedParams(nil) })
+	spec.SetDeniedParams([]string{"csv"})
+
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/favorite",
+		InputSchema: schema("opt"),
+		ParamIn:     paramIn("query", "opt"),
+	}
+
+	// A client that still sends a denied parameter must not fail: it is dropped.
+	res := c.Call(context.Background(), &tool, map[string]any{"opt": "x", "csv": true})
+	if res.IsError {
+		t.Fatalf("denied parameter must be ignored, got: %s", res.ErrorMessage)
+	}
+	if gotQuery != "opt=x" {
+		t.Fatalf("query = %q, want only opt=x", gotQuery)
+	}
+}
+
+func TestCallExtraQueryDoesNotOverrideExplicitValue(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("reportId", "extraQuery"),
+		ParamIn:     map[string]string{"reportId": "query", "extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"reportId":   float64(42),
+		"extraQuery": map[string]any{"reportId": "999"},
+	})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.ErrorMessage)
+	}
+	q, _ := url.ParseQuery(gotQuery)
+	if got := q["reportId"]; len(got) != 1 || got[0] != "42" {
+		t.Fatalf("reportId = %v, want exactly 42", got)
+	}
+}
+
+func TestCallUnknownArgumentIsError(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/favorite",
+		InputSchema: schema("opt"),
+		ParamIn:     paramIn("query", "opt"),
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{"opt": "x", "jhre": "2025"})
+	if !res.IsError {
+		t.Fatal("unknown argument must be an error")
+	}
+	if !strings.Contains(res.ErrorMessage, "jhre") || !strings.Contains(res.ErrorMessage, "declares") {
+		t.Fatalf("ErrorMessage = %q", res.ErrorMessage)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("server calls = %d, want 0", calls.Load())
+	}
+}
+
+func TestCallUnknownArgumentPointsAtExtraQuery(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/reports/execute",
+		InputSchema: schema("reportId", "extraQuery"),
+		ParamIn:     map[string]string{"reportId": "query", "extraQuery": "query"},
+		ExtraQuery:  "extraQuery",
+	}
+
+	// The exact shape the agent used by mistake.
+	res := c.Call(context.Background(), &tool, map[string]any{
+		"reportId": float64(115),
+		"jahr":     "number,2025",
+	})
+	if !res.IsError {
+		t.Fatal("a top-level undeclared argument must not be silently dropped")
+	}
+	for _, want := range []string{"jahr", "extraQuery"} {
+		if !strings.Contains(res.ErrorMessage, want) {
+			t.Errorf("ErrorMessage %q lacks %q", res.ErrorMessage, want)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("server calls = %d, want 0", calls.Load())
+	}
+}
+
+func TestCallNilArgumentIgnored(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	tool := spec.Tool{
+		Method:      http.MethodGet,
+		Path:        "/api/favorite",
+		InputSchema: schema("opt"),
+		ParamIn:     paramIn("query", "opt"),
+	}
+
+	res := c.Call(context.Background(), &tool, map[string]any{"opt": "x", "unused": nil})
+	if res.IsError {
+		t.Fatalf("nullable unused argument must not fail: %s", res.ErrorMessage)
+	}
+	if gotQuery != "opt=x" {
+		t.Fatalf("query = %q", gotQuery)
 	}
 }

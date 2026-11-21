@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,7 +110,7 @@ func (c *Client) warn(msg string) {
 
 // Call builds and executes the request for tool with args and returns the
 // response body as text. Only arguments whose names appear in tool.ParamIn
-// are sent; anything else (including a removed "csv" parameter) is dropped.
+// are sent; anything else is reported as an unknown argument.
 func (c *Client) Call(ctx context.Context, tool *spec.Tool, args map[string]any) Result {
 	req, err := c.buildRequest(ctx, tool, args)
 	if err != nil {
@@ -247,6 +248,10 @@ func (c *Client) buildTarget(tool *spec.Tool, args map[string]any) (string, []by
 		return "", nil, nil, err
 	}
 
+	if err := unknownArgsError(tool, args); err != nil { //nolint:govet // shadow: the outer err is the path resolution error and already handled
+		return "", nil, nil, err
+	}
+
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("invalid base URL: %w", err)
@@ -268,6 +273,12 @@ func (c *Client) buildTarget(tool *spec.Tool, args map[string]any) (string, []by
 		case "path":
 			// already handled by resolvePath
 		case "query":
+			if name == tool.ExtraQuery {
+				if err := appendExtraQuery(query, name, value); err != nil { //nolint:govet // shadow: the outer err is the URL parse error and already handled
+					return "", nil, nil, err
+				}
+				continue
+			}
 			appendQuery(query, name, value)
 		case "header":
 			if ignoredHeaders[strings.ToLower(name)] {
@@ -493,4 +504,90 @@ func loginMessage(d auth.DeviceLogin) string {
 		"Sign-in required. Open %s and enter the code %s, then run this tool again. "+
 			"The sign-in happened in the background; this message appears until it is confirmed.",
 		d.VerificationURI, d.UserCode)
+}
+
+// appendExtraQuery expands a free-form query object into individual query
+// parameters. Only tools that opt in via spec.Filter.ExtraQueryPaths carry such
+// a parameter; every other query value is still filtered by ParamIn.
+//
+// Reserved names would let a caller smuggle a request the tool does not offer,
+// so they are rejected rather than silently dropped. A name the caller already
+// passed explicitly is not overwritten: the explicit value stays.
+func appendExtraQuery(query url.Values, name string, value any) error {
+	entries, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("parameter %q must be an object of query names to values", name)
+	}
+	for key, raw := range entries {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("parameter %q contains an empty query name", name)
+		}
+		if reservedExtraQuery[strings.ToLower(key)] {
+			return fmt.Errorf("parameter %q may not set the reserved query name %q", name, key)
+		}
+		if spec.ParamDenied(key) {
+			return fmt.Errorf("parameter %q may not set the denied query name %q", name, key)
+		}
+		if query.Has(key) {
+			continue
+		}
+		appendQuery(query, key, raw)
+	}
+	return nil
+}
+
+// reservedExtraQuery lists query names the request itself controls, so a
+// free-form object can never rewrite content negotiation or identify another
+// user. Only headers the client sets for every request belong here; anything
+// API-specific is spec.DeniedParams.
+var reservedExtraQuery = map[string]bool{
+	"accept":       true,
+	"content-type": true,
+}
+
+// unknownArgsError rejects arguments the tool does not declare. Silently
+// dropping them hides a typo or a misunderstanding and surfaces much later as a
+// backend error about a missing parameter. For a tool with a free-form query
+// parameter the message names it, so the caller can move the argument there.
+func unknownArgsError(tool *spec.Tool, args map[string]any) error {
+	var unknown []string
+	for name, value := range args {
+		if value == nil {
+			continue
+		}
+		if _, known := tool.ParamIn[name]; known {
+			continue
+		}
+		// A denied parameter is dropped by design, so a client that still sends
+		// it must not fail.
+		if spec.ParamDenied(name) {
+			continue
+		}
+		unknown = append(unknown, name)
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	slices.Sort(unknown)
+
+	if tool.ExtraQuery != "" {
+		return fmt.Errorf(
+			"unknown argument(s) %s: this tool declares %q for query parameters the spec does not list; pass them as %s: {%q: %q}",
+			strings.Join(unknown, ", "), tool.ExtraQuery, tool.ExtraQuery,
+			unknown[0], args[unknown[0]])
+	}
+	return fmt.Errorf("unknown argument(s) %s; the tool declares: %s", strings.Join(unknown, ", "), declaredArgs(tool))
+}
+
+// declaredArgs lists the tool's parameter names for an error message.
+func declaredArgs(tool *spec.Tool) string {
+	names := make([]string, 0, len(tool.ParamIn))
+	for name := range tool.ParamIn {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
 }

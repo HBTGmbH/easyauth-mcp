@@ -36,6 +36,32 @@ func SetDeniedTags(tags []string) {
 	DeniedTags = tags
 }
 
+// DeniedParams lists parameter and query names that never reach a request,
+// whatever the spec declares. A deployment uses it when the API offers a knob
+// the client controls itself (a response format, for example), so exposing it
+// would contradict the client's fixed behavior.
+//
+// Empty by default: the generic server hides nothing on its own.
+var DeniedParams []string
+
+// SetDeniedParams replaces the parameter deny list. Names match
+// case-insensitively. Intended for wiring the configuration.
+func SetDeniedParams(names []string) {
+	DeniedParams = names
+}
+
+// ParamDenied reports whether name is configured as a denied parameter. It is
+// consulted when building schemas and again when building a request, so a
+// denied name cannot slip in through a free-form query object.
+func ParamDenied(name string) bool {
+	for _, denied := range DeniedParams {
+		if strings.EqualFold(denied, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // remoteSpecSizeLimit is the effective remote download limit. Variable so
 // tests can lower it.
 var remoteSpecSizeLimit = maxRemoteSpecSize
@@ -59,7 +85,18 @@ type Filter struct {
 	// if they also appear in DeniedTags.
 	AllowedTags    []string
 	AllowedMethods []string // default ["GET"], case-insensitive
+	// ExtraQueryPaths names paths (exact match on the OpenAPI path, not the
+	// request URL) whose tools accept undeclared query parameters. Some APIs take
+	// query names that exist only at runtime, e.g. report parameters named after
+	// the variables in the report's SQL. Everything is opt-in: a path not listed
+	// here never receives such parameters.
+	ExtraQueryPaths []string
+	// ExtraQueryName is the tool parameter that carries the free-form query
+	// values. Defaults to "extraQuery".
+	ExtraQueryName string
 }
+
+const defaultExtraQueryName = "extraQuery"
 
 // Tool is a single MCP tool derived from one OpenAPI operation.
 type Tool struct {
@@ -68,7 +105,11 @@ type Tool struct {
 	InputSchema map[string]any
 	// ParamIn maps each InputSchema property name to its origin:
 	// "path", "query", "header" or "body".
-	ParamIn     map[string]string
+	ParamIn map[string]string
+	// ExtraQuery is the name of the free-form query parameter this tool exposes,
+	// or "" if it has none. Its value is an object of query names to values that
+	// the OpenAPI spec does not declare; see Filter.ExtraQueryPaths.
+	ExtraQuery  string
 	Method      string
 	Path        string
 	OperationID string
@@ -162,7 +203,7 @@ type BuildResult struct {
 
 // Build parses an OpenAPI 3 document and derives the MCP tools matching filter.
 // The document is only parsed, never validated. External $refs are rejected.
-func Build(data []byte, filter Filter) ([]Tool, error) {
+func Build(data []byte, filter *Filter) ([]Tool, error) {
 	res, err := BuildWith(data, filter)
 	if err != nil {
 		return nil, err
@@ -171,7 +212,7 @@ func Build(data []byte, filter Filter) ([]Tool, error) {
 }
 
 // BuildWith is Build plus the write operations that the method filter dropped.
-func BuildWith(data []byte, filter Filter) (BuildResult, error) {
+func BuildWith(data []byte, filter *Filter) (BuildResult, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = false
 
@@ -219,12 +260,24 @@ func BuildWith(data []byte, filter Filter) (BuildResult, error) {
 			usedNames[name] = struct{}{}
 
 			schema, paramIn := buildInputSchema(operation, pathItem)
+			extraQuery := ""
+			if slices.Contains(filter.ExtraQueryPaths, path) && !paramInHas(filter.ExtraQueryName, paramIn) {
+				extraQuery = filter.ExtraQueryName
+				paramIn[extraQuery] = "query"
+				addExtraQueryProperty(schema, extraQuery)
+			}
+
+			description := buildDescription(operation, method, path)
+			if extraQuery != "" {
+				description = appendExtraQueryHint(description, extraQuery)
+			}
 
 			tools = append(tools, Tool{
 				Name:        name,
-				Description: buildDescription(operation, method, path),
+				Description: description,
 				InputSchema: schema,
 				ParamIn:     paramIn,
+				ExtraQuery:  extraQuery,
 				Method:      method,
 				Path:        path,
 				OperationID: operation.OperationID,
@@ -235,12 +288,15 @@ func BuildWith(data []byte, filter Filter) (BuildResult, error) {
 	return BuildResult{Tools: tools, SkippedWriteMethods: skipped}, nil
 }
 
-func normalizeFilter(filter Filter) Filter {
+func normalizeFilter(filter *Filter) *Filter {
 	if filter.PathPrefix == "" {
 		filter.PathPrefix = defaultPathPrefix
 	}
 	if len(filter.AllowedMethods) == 0 {
 		filter.AllowedMethods = []string{http.MethodGet}
+	}
+	if filter.ExtraQueryName == "" {
+		filter.ExtraQueryName = defaultExtraQueryName
 	}
 	return filter
 }
@@ -307,4 +363,39 @@ func truncateUTF8(s string, limit int) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// paramInHas reports whether name is already a tool parameter, so a configured
+// extraQuery name never overwrites a declared one.
+func paramInHas(name string, paramIn map[string]string) bool {
+	_, exists := paramIn[name]
+	return exists
+}
+
+// addExtraQueryProperty adds the free-form query parameter to the input schema.
+// additionalProperties is an open string map: the query names exist only at
+// runtime, so they cannot be declared as fixed properties.
+func addExtraQueryProperty(schema map[string]any, name string) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		properties = make(map[string]any)
+		schema["properties"] = properties
+	}
+	properties[name] = map[string]any{
+		"type":        "object",
+		"description": "Additional query parameters the OpenAPI spec does not declare, as name to value; every value is sent as a string.",
+		"additionalProperties": map[string]any{
+			"type": []string{"string", "number", "boolean"},
+		},
+	}
+}
+
+// appendExtraQueryHint tells the reader that undeclared query parameters belong
+// into the extraQuery object, not beside it. The schema alone carries the type,
+// but an agent tends to pass a name it found in the description as a top-level
+// argument.
+func appendExtraQueryHint(description, name string) string {
+	return truncateUTF8(description+"\n\nQuery parameters not listed in this schema go into "+
+		`"`+name+`"`+" as an object of name to value, e.g. {\""+name+"\": {\"year\": \"2025\"}}. "+
+		"Top-level arguments outside the schema are rejected.", maxDescriptionLen)
 }

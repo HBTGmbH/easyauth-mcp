@@ -77,12 +77,13 @@ Before finishing: `make fmt && make check && make lint`.
   `easyauth_sign_in` (device code, then installs the real tools).
 - `internal/spec` - OpenAPI to tool conversion: loading, filtering, naming,
   input schemas, and the `ParamIn` map. `BuildWith` additionally reports write
-  operations that the method filter dropped.
+  operations that the method filter dropped. Tools below a configured
+  `ExtraQueryPaths` entry accept undeclared query parameters.
 - `internal/auth` - Entra device code flow, token store, refresh, and the
   `Session` that keeps the login non-blocking.
 - `internal/api` - generic HTTP executor: path/query/header/body routing via
-  `ParamIn`, 401 retry, body limit, error classification, and method-preserving
-  redirect handling.
+  `ParamIn`, expansion of the free-form `extraQuery` object, 401 retry, body
+  limit, error classification, and method-preserving redirect handling.
 
 ## Important facts
 
@@ -101,8 +102,9 @@ real-world API behaviors the design must handle.
   failure. It is passed through as content with its status code.
 - The spec document is **not** public in every deployment: it can return `401`. The spec fetch therefore reuses an access
   token when one is available.
-- CSV output is not offered; the `csv` query parameter is dropped from tool
-  schemas, and `Accept` stays `application/json`.
+- CSV output is not offered; `Accept` stays `application/json`. A deployment that
+  wants to hide a response-format switch sets
+  `EASYAUTH_DENIED_PARAMS=<name>` (empty by default).
 - Task names come from `operationId` when stable, otherwise from
   `METHOD + path`. springdoc's `..._1` suffixes are artifacts, not API.
 

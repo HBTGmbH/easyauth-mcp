@@ -167,10 +167,12 @@ func buildTools(data []byte, s *settings) ([]spec.Tool, error) {
 
 func buildToolsWith(data []byte, s *settings) (spec.BuildResult, error) {
 	spec.SetDeniedTags(s.DenyTags)
-	return spec.BuildWith(data, spec.Filter{
-		PathPrefix:     s.PathPrefix,
-		AllowedTags:    s.AllowedTags,
-		AllowedMethods: s.AllowedMeths,
+	spec.SetDeniedParams(s.DenyParams)
+	return spec.BuildWith(data, &spec.Filter{
+		PathPrefix:      s.PathPrefix,
+		AllowedTags:     s.AllowedTags,
+		AllowedMethods:  s.AllowedMeths,
+		ExtraQueryPaths: s.ExtraQuery,
 	})
 }
 

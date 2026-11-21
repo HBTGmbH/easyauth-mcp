@@ -31,6 +31,8 @@ type settings struct {
 	AllowedMeths []string
 	PathPrefix   string
 	DenyTags     []string
+	ExtraQuery   []string
+	DenyParams   []string
 	Reauth       bool
 	// ConfigError collects every problem that makes the settings unusable
 	// (missing required values, insecure URLs). The MCP server still starts and
@@ -63,6 +65,8 @@ func parseSettings(args []string, out io.Writer) (settings, bool, error) {
 		allowedMeth = fs.String("allowed-methods", "GET", "comma list of allowed HTTP methods (defaults to $EASYAUTH_ALLOWED_METHODS)")
 		pathPrefix  = fs.String("path-prefix", "/api/", "only paths with this prefix become tools (defaults to $EASYAUTH_PATH_PREFIX)")
 		denyTags    = fs.String("deny-tags", "", "comma list of tags that never become tools, even when allowed (defaults to $EASYAUTH_DENY_TAGS)")
+		extraQuery  = fs.String("extra-query-paths", "", "comma list of OpenAPI paths whose tools accept undeclared query parameters (defaults to $EASYAUTH_EXTRA_QUERY_PATHS)")
+		denyParams  = fs.String("denied-params", "", "comma list of parameter names that never reach a request (defaults to $EASYAUTH_DENIED_PARAMS)")
 		reauth      = fs.Bool("reauth", false, "ignore the cached token and sign in again")
 	)
 
@@ -76,7 +80,7 @@ Configuration comes from flags and environment variables; flags win.
 Environment variables: EASYAUTH_BASE_URL, EASYAUTH_OPENAPI, EASYAUTH_LOGIN_URL, EASYAUTH_TENANT_ID,
 EASYAUTH_CLIENT_ID, EASYAUTH_SCOPE, EASYAUTH_TOKEN_STORE, EASYAUTH_AUTH_HEADER,
 EASYAUTH_PRINCIPAL_HEADER, EASYAUTH_ALLOWED_TAGS, EASYAUTH_ALLOWED_METHODS, EASYAUTH_PATH_PREFIX,
-EASYAUTH_DENY_TAGS.
+EASYAUTH_DENY_TAGS, EASYAUTH_EXTRA_QUERY_PATHS, EASYAUTH_DENIED_PARAMS.
 
 Flags:
 `)
@@ -104,6 +108,8 @@ Flags:
 		AllowedMeths: splitList(resolve(fs, "allowed-methods", *allowedMeth, "EASYAUTH_ALLOWED_METHODS")),
 		PathPrefix:   resolve(fs, "path-prefix", *pathPrefix, "EASYAUTH_PATH_PREFIX"),
 		DenyTags:     splitList(resolve(fs, "deny-tags", *denyTags, "EASYAUTH_DENY_TAGS")),
+		ExtraQuery:   splitList(resolve(fs, "extra-query-paths", *extraQuery, "EASYAUTH_EXTRA_QUERY_PATHS")),
+		DenyParams:   splitList(resolve(fs, "denied-params", *denyParams, "EASYAUTH_DENIED_PARAMS")),
 		Reauth:       *reauth,
 	}
 
